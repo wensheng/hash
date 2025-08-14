@@ -10,9 +10,9 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-    {name = "Hash CLI Team"},
+    {name = "Wensheng Wang"},
 ]
-keywords = ["cli", "llm", "assistant", "terminal", "ai"]
+keywords = ["cli", "llm", "assistant", "terminal", "ai", "hash"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -37,7 +37,6 @@ dependencies = [
     "pydantic>=2.0.0",
     "aiohttp>=3.8.0",
     "toml>=0.10.2",
-    "pathlib2>=2.3.0; python_version<'3.4'",
 ]
 
 [project.optional-dependencies]
