@@ -34,12 +34,21 @@ class ConfigCommand(Command):
         output += "[bold blue]LLM Configuration:[/bold blue]\n"
         output += f"  Provider: {config.llm_provider.value}\n"
         output += f"  Model: {config.get_current_model()}\n"
-        output += f"  API Key: {'✓ Set' if config.get_current_api_key() else '✗ Not set'}\n\n"
+        output += f"  Max response tokens: {config.max_response_tokens}\n"
+        output += (
+            f"  API Key: {'✓ Set' if config.get_current_api_key() else '✗ Not set'}\n\n"
+        )
 
         # Tool Configuration
         output += "[bold blue]Tool Configuration:[/bold blue]\n"
-        output += f"  Command execution: {'Enabled' if config.allow_command_execution else 'Disabled'}\n"
-        output += f"  Confirmation required: {'Yes' if config.require_confirmation else 'No'}\n"
+        output += (
+            "  Command execution:"
+            f" {'Enabled' if config.allow_command_execution else 'Disabled'}\n"
+        )
+        output += (
+            "  Confirmation required:"
+            f" {'Yes' if config.require_confirmation else 'No'}\n"
+        )
         output += f"  Command timeout: {config.command_timeout}s\n"
         output += (
             f"  Sandbox commands: {'Yes' if config.sandbox_commands else 'No'}\n\n"
@@ -57,6 +66,7 @@ class ConfigCommand(Command):
         # Output Configuration
         output += "[bold blue]Output Configuration:[/bold blue]\n"
         output += f"  Rich output: {'Yes' if config.rich_output else 'No'}\n"
+        output += f"  Streaming: {'Yes' if config.streaming else 'No'}\n"
         output += f"  Debug mode: {'Yes' if config.show_debug else 'No'}\n"
         output += f"  Log level: {config.log_level.value}\n\n"
 

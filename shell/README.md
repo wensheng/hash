@@ -1,0 +1,1 @@
+# Hashcmd hashcli shell integration

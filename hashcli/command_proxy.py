@@ -188,7 +188,10 @@ class HistoryCommand(Command):
 
             output = "Recent conversations:\n"
             for session in sessions[-10:]:  # Show last 10
-                output += f"  {session['id']}: {session['created']} ({session['message_count']} messages)\n"
+                output += (
+                    f"  {session['id']}: {session['created']}"
+                    f" ({session['message_count']} messages)\n"
+                )
             return output.strip()
 
         elif args[0] == "show" and len(args) > 1:

@@ -1,7 +1,7 @@
 """Base LLM provider interface and common functionality."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ..config import HashConfig
 from ..llm_handler import LLMResponse, ToolCall
@@ -18,12 +18,14 @@ class LLMProvider(ABC):
         self,
         messages: List[Dict[str, str]],
         tools: Optional[List[Dict[str, Any]]] = None,
+        stream_handler: Optional[Callable[[str], None]] = None,
     ) -> LLMResponse:
         """Generate a response from the LLM provider.
 
         Args:
             messages: List of conversation messages in OpenAI format
             tools: Optional list of available tools for the LLM to call
+            stream_handler: Optional callback for streaming text deltas
 
         Returns:
             LLMResponse object containing the response and any tool calls

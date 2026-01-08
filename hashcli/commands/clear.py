@@ -45,7 +45,10 @@ class ClearCommand(Command):
 
                 cleared_count = history.clear_old_history(days)
                 if cleared_count > 0:
-                    return f"Cleared {cleared_count} old conversations (older than {days} days)."
+                    return (
+                        f"Cleared {cleared_count} old conversations (older than {days}"
+                        " days)."
+                    )
                 else:
                     return f"No conversations older than {days} days found."
 

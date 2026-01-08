@@ -48,8 +48,7 @@ class ConversationHistory:
     def _init_database(self):
         """Initialize SQLite database with required tables."""
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
                     id TEXT PRIMARY KEY,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -57,11 +56,9 @@ class ConversationHistory:
                     title TEXT,
                     metadata TEXT  -- JSON
                 )
-            """
-            )
+            """)
 
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id TEXT NOT NULL,
@@ -71,22 +68,17 @@ class ConversationHistory:
                     metadata TEXT,  -- JSON
                     FOREIGN KEY (session_id) REFERENCES sessions (id)
                 )
-            """
-            )
+            """)
 
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_messages_session_id 
                 ON messages (session_id)
-            """
-            )
+            """)
 
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_messages_timestamp 
                 ON messages (timestamp)
-            """
-            )
+            """)
 
             conn.commit()
 
@@ -436,16 +428,14 @@ class ConversationHistory:
             timestamp = message["timestamp"]
             content = message["content"]
 
-            lines.extend(
-                [
-                    f"## Message {i} - {role}",
-                    f"*{timestamp}*",
-                    f"",
-                    content,
-                    f"",
-                    f"---",
-                    f"",
-                ]
-            )
+            lines.extend([
+                f"## Message {i} - {role}",
+                f"*{timestamp}*",
+                f"",
+                content,
+                f"",
+                f"---",
+                f"",
+            ])
 
         return "\\n".join(lines)

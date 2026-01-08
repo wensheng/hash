@@ -11,6 +11,9 @@ if __name__ == "__main__" and __package__ is None:
 
 
 import asyncio
+import os
+import subprocess
+from pathlib import Path
 from typing import List, Optional
 
 import typer
@@ -22,7 +25,10 @@ from rich.text import Text
 from hashcli.command_proxy import CommandProxy
 from hashcli.config import (
     ConfigurationError,
+    LLMProvider,
+    get_model_options,
     load_configuration,
+    save_config,
     validate_api_setup,
 )
 from hashcli.llm_handler import LLMHandler
@@ -97,19 +103,27 @@ def show_config_callback(value: bool):
             console.print(f"Provider: [cyan]{config.llm_provider.value}[/cyan]")
             console.print(f"Model: [cyan]{config.get_current_model()}[/cyan]")
             console.print(
-                f"API Key: [green]{'✓ Set' if config.get_current_api_key() else '✗ Not set'}[/green]"
+                "API Key:"
+                f" [green]{'✓ Set' if config.get_current_api_key() else '✗ Not set'}[/green]"
             )
             console.print(
-                f"Command execution: [cyan]{'Enabled' if config.allow_command_execution else 'Disabled'}[/cyan]"
+                "Command execution:"
+                f" [cyan]{'Enabled' if config.allow_command_execution else 'Disabled'}[/cyan]"
             )
             console.print(
-                f"Confirmation required: [cyan]{'Yes' if config.require_confirmation else 'No'}[/cyan]"
+                "Confirmation required:"
+                f" [cyan]{'Yes' if config.require_confirmation else 'No'}[/cyan]"
             )
             console.print(
-                f"History: [cyan]{'Enabled' if config.history_enabled else 'Disabled'}[/cyan]"
+                "History:"
+                f" [cyan]{'Enabled' if config.history_enabled else 'Disabled'}[/cyan]"
             )
             if config.history_enabled:
                 console.print(f"History location: [dim]{config.history_dir}[/dim]")
+            console.print(
+                "Streaming:"
+                f" [cyan]{'Enabled' if config.streaming else 'Disabled'}[/cyan]"
+            )
 
         except Exception as e:
             console.print(f"[bold red]Error loading configuration:[/bold red] {e}")
@@ -117,7 +131,7 @@ def show_config_callback(value: bool):
         raise typer.Exit()
 
 
-def setup_callback(value: bool):
+def config_callback(value: bool):
     """Run interactive setup wizard and exit."""
     if value:
         console.print("\n[bold blue]Hash CLI Setup Wizard[/bold blue]")
@@ -132,17 +146,38 @@ def setup_callback(value: bool):
         provider_choice = typer.prompt("Enter choice (1-3)", type=int)
 
         if provider_choice == 1:
-            provider = "openai"
+            provider = LLMProvider.OPENAI
             console.print("\n[bold]2. Get your OpenAI API key:[/bold]")
             console.print("   Visit: https://platform.openai.com/api-keys")
         elif provider_choice == 2:
-            provider = "anthropic"
+            provider = LLMProvider.ANTHROPIC
             console.print("\n[bold]2. Get your Anthropic API key:[/bold]")
             console.print("   Visit: https://console.anthropic.com/")
         elif provider_choice == 3:
-            provider = "google"
+            provider = LLMProvider.GOOGLE
             console.print("\n[bold]2. Get your Google AI API key:[/bold]")
             console.print("   Visit: https://makersuite.google.com/app/apikey")
+        else:
+            console.print("[red]Invalid choice[/red]")
+            raise typer.Exit(1)
+
+        # Select Model
+        console.print(
+            f"\n[bold]2. Select {provider.value.capitalize()} Model:[/bold]"
+        )
+        options = get_model_options(provider)
+        for i, model in enumerate(options, 1):
+            console.print(f"   {i}) {model}")
+        console.print(f"   {len(options) + 1}) Custom model name")
+
+        model_choice = typer.prompt(
+            f"Select model (1-{len(options)+1})", type=int, default=1
+        )
+
+        if 1 <= model_choice <= len(options):
+            selected_model = options[model_choice - 1]
+        elif model_choice == len(options) + 1:
+            selected_model = typer.prompt("Enter custom model name")
         else:
             console.print("[red]Invalid choice[/red]")
             raise typer.Exit(1)
@@ -150,18 +185,73 @@ def setup_callback(value: bool):
         # API key input
         api_key = typer.prompt("\nEnter your API key", hide_input=True)
 
-        # Set environment variable suggestion
-        env_var = f"{provider.upper()}_API_KEY"
-        console.print(f"\n[bold]3. Save your API key:[/bold]")
-        console.print(f"   Add this to your shell profile (.bashrc, .zshrc, etc.):")
-        console.print(f'   [code]export {env_var}="{api_key[:8]}..."[/code]')
-        console.print(
-            "   Then reload your terminal or run: [code]source ~/.bashrc[/code]"
-        )
+        # Save API key to config
+        if provider == LLMProvider.OPENAI:
+            config = load_configuration()
+            config.openai_model = selected_model
+            config.openai_api_key = api_key
+            save_config(config)
+        elif provider == LLMProvider.ANTHROPIC:
+            config = load_configuration()
+            config.anthropic_model = selected_model
+            config.anthropic_api_key = api_key
+            save_config(config)
+        elif provider == LLMProvider.GOOGLE:
+            config = load_configuration()
+            config.google_model = selected_model
+            config.google_api_key = api_key
+            save_config(config)
 
         console.print("\n[bold green]Setup complete![/bold green]")
+        console.print("API key has been saved to ~/.hashcli/config.toml")
         console.print("Try: [code]hashcli hello world[/code]")
         raise typer.Exit()
+
+
+def setup_callback(value: bool):
+    """Install shell integration and exit."""
+    if not value:
+        return
+
+    shell_env = os.environ.get("SHELL", "")
+    shell_name = Path(shell_env).name
+
+    if shell_name != "zsh":
+        console.print(
+            "[yellow]Shell integration setup currently supports zsh only.[/yellow]"
+        )
+        console.print(
+            f"Detected shell: [dim]{shell_name or 'unknown'}[/dim]"
+        )
+        console.print("For other shells, use the scripts in the shell directory.")
+        raise typer.Exit(1)
+
+    module_dir = Path(__file__).resolve().parent
+    candidate_paths = [
+        module_dir / "shell" / "zsh" / "install.sh",
+        module_dir.parent / "shell" / "zsh" / "install.sh",
+    ]
+
+    script_path = next((path for path in candidate_paths if path.is_file()), None)
+    if script_path is None:
+        console.print(
+            "[bold red]Unable to locate zsh install script.[/bold red]"
+        )
+        raise typer.Exit(1)
+
+    console.print("[bold blue]Installing zsh shell integration...[/bold blue]")
+    try:
+        subprocess.run(
+            ["/bin/bash", str(script_path), "install"],
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        console.print(
+            "[bold red]Shell integration setup failed.[/bold red]"
+        )
+        raise typer.Exit(exc.returncode) from exc
+
+    raise typer.Exit()
 
 
 @app.callback(invoke_without_command=True)
@@ -216,7 +306,14 @@ def main(
         "--setup",
         callback=setup_callback,
         is_eager=True,
-        help="Run the interactive setup wizard and exit.",
+        help="Install shell integration and exit.",
+    ),
+    configure: Optional[bool] = typer.Option(
+        None,
+        "--config",
+        callback=config_callback,
+        is_eager=True,
+        help="Interactively configure model provider and model.",
     ),
 ):
     """Main function for the Hash CLI."""
@@ -273,14 +370,30 @@ def execute_command_mode(input_text: str, config, quiet: bool = False):
 
 async def execute_llm_mode(input_text: str, config, quiet: bool = False):
     """Execute query in LLM chat mode."""
+    handler = LLMHandler(config)
+
+    if config.streaming:
+        streamed_output = {"emitted": False}
+
+        def stream_handler(chunk: str) -> None:
+            if not chunk:
+                return
+            streamed_output["emitted"] = True
+            console.print(chunk, end="", markup=False)
+
+        result = await handler.chat(input_text, stream_handler=stream_handler)
+        if streamed_output["emitted"]:
+            console.print()
+        elif result:
+            display_result(result, config, quiet)
+        return
+
     if not quiet:
         with console.status(
             f"[dim]Thinking with {config.get_current_model()}...[/dim]"
         ):
-            handler = LLMHandler(config)
             result = await handler.chat(input_text)
     else:
-        handler = LLMHandler(config)
         result = await handler.chat(input_text)
 
     if result:

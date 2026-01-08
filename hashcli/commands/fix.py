@@ -33,7 +33,12 @@ Focus on being practical and actionable."""
 
         # This would normally trigger LLM mode with the specialized prompt
         # For now, return a message indicating the prompt would be processed
-        return f"Coding assistance request: '{description}'\n\nThis would normally trigger an LLM conversation with specialized coding context. In a full implementation, this would seamlessly switch to LLM mode with the enhanced prompt above."
+        return (
+            f"Coding assistance request: '{description}'\n\nThis would normally trigger"
+            " an LLM conversation with specialized coding context. In a full"
+            " implementation, this would seamlessly switch to LLM mode with the"
+            " enhanced prompt above."
+        )
 
     def get_help(self) -> str:
         """Get help text for the fix command."""

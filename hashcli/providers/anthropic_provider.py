@@ -1,7 +1,7 @@
 """Anthropic provider implementation for Hash CLI."""
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import anthropic
 from anthropic import AsyncAnthropic
@@ -23,6 +23,7 @@ class AnthropicProvider(LLMProvider):
         self,
         messages: List[Dict[str, str]],
         tools: Optional[List[Dict[str, Any]]] = None,
+        stream_handler: Optional[Callable[[str], None]] = None,
     ) -> LLMResponse:
         """Generate response using Anthropic API."""
 
@@ -34,7 +35,7 @@ class AnthropicProvider(LLMProvider):
             request_params = {
                 "model": self.model,
                 "messages": anthropic_messages["messages"],
-                "max_tokens": 2000,
+                "max_tokens": self.config.max_response_tokens,
                 "temperature": 0.7,
             }
 
@@ -47,7 +48,15 @@ class AnthropicProvider(LLMProvider):
                 request_params["tools"] = self._format_tools_for_provider(tools)
 
             # Make API call
-            response = await self.client.messages.create(**request_params)
+            streamed_content: List[str] = []
+            if self.config.streaming and stream_handler:
+                async with self.client.messages.stream(**request_params) as stream:
+                    async for text in stream.text_stream:
+                        streamed_content.append(text)
+                        stream_handler(text)
+                    response = await stream.get_final_message()
+            else:
+                response = await self.client.messages.create(**request_params)
 
             # Extract response content and tool calls
             content_blocks = response.content
@@ -63,14 +72,17 @@ class AnthropicProvider(LLMProvider):
                             name=block.name, arguments=block.input, call_id=block.id
                         )
                     )
+            if not content and streamed_content:
+                content = "".join(streamed_content)
 
             # Extract usage information
             usage = (
                 {
                     "input_tokens": response.usage.input_tokens,
                     "output_tokens": response.usage.output_tokens,
-                    "total_tokens": response.usage.input_tokens
-                    + response.usage.output_tokens,
+                    "total_tokens": (
+                        response.usage.input_tokens + response.usage.output_tokens
+                    ),
                 }
                 if response.usage
                 else None
@@ -141,13 +153,11 @@ class AnthropicProvider(LLMProvider):
         for tool in tools:
             if tool["type"] == "function":
                 func = tool["function"]
-                anthropic_tools.append(
-                    {
-                        "name": func["name"],
-                        "description": func["description"],
-                        "input_schema": func["parameters"],
-                    }
-                )
+                anthropic_tools.append({
+                    "name": func["name"],
+                    "description": func["description"],
+                    "input_schema": func["parameters"],
+                })
 
         return anthropic_tools
 

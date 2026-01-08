@@ -43,6 +43,9 @@ class HashConfig(BaseModel):
     )
     google_api_key: Optional[str] = Field(default=None, description="Google AI API key")
     google_model: str = Field(default="gemini-pro", description="Default Google model")
+    max_response_tokens: int = Field(
+        default=512, description="Maximum tokens in LLM responses"
+    )
 
     # Tool Configuration
     allow_command_execution: bool = Field(
@@ -69,6 +72,9 @@ class HashConfig(BaseModel):
 
     # Output Configuration
     rich_output: bool = Field(default=True, description="Enable rich text formatting")
+    streaming: bool = Field(
+        default=False, description="Enable streaming responses from providers"
+    )
     show_debug: bool = Field(default=False, description="Show debug information")
     log_level: LogLevel = Field(default=LogLevel.INFO, description="Logging level")
 
@@ -99,6 +105,19 @@ class HashConfig(BaseModel):
         if v and isinstance(v, str):
             return v.strip()
         return v
+
+    @validator("max_response_tokens", pre=True)
+    def validate_max_response_tokens(cls, v):
+        """Ensure response token limit is a positive integer."""
+        if v is None:
+            return v
+        try:
+            value = int(v)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("max_response_tokens must be an integer") from exc
+        if value <= 0:
+            raise ValueError("max_response_tokens must be positive")
+        return value
 
     def get_current_model(self) -> str:
         """Get the current model for the selected provider."""
@@ -252,15 +271,31 @@ def load_configuration(
         # Save the default/fallback configuration
         save_config(config, primary_config_path)
 
-    # After creating config, check for standard API keys if not already set
-    if not config.openai_api_key:
-        config.openai_api_key = os.environ.get("OPENAI_API_KEY")
+    # After creating config, apply standard API key env overrides.
+    def get_nonempty_env_value(env_var: str) -> Optional[str]:
+        value = os.environ.get(env_var)
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
-    if not config.anthropic_api_key:
-        config.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if "HASHCLI_OPENAI_API_KEY" not in os.environ:
+        openai_key = get_nonempty_env_value("OPENAI_API_KEY")
+        if openai_key:
+            config.openai_api_key = openai_key
 
-    if not config.google_api_key:
-        config.google_api_key = os.environ.get("GOOGLE_API_KEY")
+    if "HASHCLI_ANTHROPIC_API_KEY" not in os.environ:
+        anthropic_key = get_nonempty_env_value("ANTHROPIC_API_KEY")
+        if anthropic_key:
+            config.anthropic_api_key = anthropic_key
+
+    if "HASHCLI_GOOGLE_API_KEY" not in os.environ:
+        google_key = (
+            get_nonempty_env_value("GEMINI_API_KEY")
+            or get_nonempty_env_value("GOOGLE_API_KEY")
+        )
+        if google_key:
+            config.google_api_key = google_key
 
     # If no config file was loaded, save the default one
     if not config_loaded_from_file:
@@ -282,10 +317,9 @@ def save_config(config: HashConfig, config_path: Optional[Path] = None) -> bool:
         if config.history_enabled and config.history_dir:
             config.history_dir.mkdir(parents=True, exist_ok=True)
 
-        # Convert config to dict, excluding None values and sensitive data
+        # Convert config to dict, excluding None values
         config_dict = config.model_dump(
             exclude_none=True,
-            exclude={"openai_api_key", "anthropic_api_key", "google_api_key"},
         )
 
         # Convert enums to their string values for TOML serialization
@@ -330,19 +364,25 @@ def get_model_options(provider: LLMProvider) -> List[str]:
     """Get available model options for a provider."""
     if provider == LLMProvider.OPENAI:
         return [
-            "gpt-5",
+            "gpt-5.2",
+            "gpt-5.1-codex-mini",
             "gpt-5-mini",
             "gpt-5-nano",
         ]
     elif provider == LLMProvider.ANTHROPIC:
         return [
-            "claude-3-opus-20240229",
-            "claude-3-sonnet-20240229",
-            "claude-3-haiku-20240307",
-            "claude-2.1",
-            "claude-2.0",
+            "claude-opus-4-5-20251101",
+            "claude-sonnet-4-5-20250929",
+            "claude-haiku-4-5-20251001",
+            "claude-3-haiku-20240307"
         ]
     elif provider == LLMProvider.GOOGLE:
-        return ["gemini-pro", "gemini-pro-vision", "gemini-1.0-pro"]
+        return [
+            "gemini-3-pro-preview",
+            "gemini-3-flash-preview",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+        ]
     else:
         return []

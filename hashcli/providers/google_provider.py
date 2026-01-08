@@ -1,13 +1,12 @@
 """Google AI provider implementation for Hash CLI."""
 
-import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
-import google.generativeai as genai
-from google.generativeai.types import HarmBlockThreshold, HarmCategory
+from google import genai
+from google.genai import types
 
 from ..config import HashConfig
-from ..llm_handler import LLMResponse, ToolCall
+from ..llm_handler import LLMResponse
 from .base import LLMProvider
 
 
@@ -16,14 +15,14 @@ class GoogleProvider(LLMProvider):
 
     def __init__(self, config: HashConfig):
         super().__init__(config)
-        genai.configure(api_key=config.google_api_key)
+        self.client = genai.Client(api_key=config.google_api_key)
         self.model_name = config.google_model
-        self.model = genai.GenerativeModel(self.model_name)
 
     async def generate_response(
         self,
         messages: List[Dict[str, str]],
         tools: Optional[List[Dict[str, Any]]] = None,
+        stream_handler: Optional[Callable[[str], None]] = None,
     ) -> LLMResponse:
         """Generate response using Google AI API."""
 
@@ -32,68 +31,88 @@ class GoogleProvider(LLMProvider):
             google_messages = self._format_messages_for_provider(messages)
 
             # Prepare generation config
-            generation_config = genai.types.GenerationConfig(
+            config = types.GenerateContentConfig(
                 temperature=0.7,
-                max_output_tokens=2000,
+                max_output_tokens=self.config.max_response_tokens,
+                safety_settings=[
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    ),
+                ]
             )
 
-            # Prepare safety settings (less restrictive for development tools)
-            safety_settings = {
-                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            }
-
-            # Start conversation or continue existing one
-            if len(google_messages) == 1:
-                # Single message
-                response = await self.model.generate_content_async(
-                    google_messages[0],
-                    generation_config=generation_config,
-                    safety_settings=safety_settings,
-                )
+            # Generate content
+            # The new SDK handles chat history via contents list nicely
+            streamed_content: List[str] = []
+            response = None
+            if self.config.streaming and stream_handler:
+                async for chunk in self.client.aio.models.generate_content_stream(
+                    model=self.model_name,
+                    contents=google_messages,
+                    config=config,
+                ):
+                    response = chunk
+                    chunk_text = getattr(chunk, "text", None)
+                    if chunk_text:
+                        streamed_content.append(chunk_text)
+                        stream_handler(chunk_text)
             else:
-                # Multi-turn conversation
-                chat = self.model.start_chat()
-                # Send all but the last message to establish history
-                for message in google_messages[:-1]:
-                    await chat.send_message_async(message)
-
-                # Send final message and get response
-                response = await chat.send_message_async(
-                    google_messages[-1],
-                    generation_config=generation_config,
-                    safety_settings=safety_settings,
+                response = await self.client.aio.models.generate_content(
+                    model=self.model_name,
+                    contents=google_messages,
+                    config=config,
                 )
 
             # Extract content
-            if response.candidates and len(response.candidates) > 0:
+            tool_calls: List[Any] = []
+            if streamed_content:
+                usage = None
+                if response and response.usage_metadata:
+                    usage = {
+                        "prompt_tokens": response.usage_metadata.prompt_token_count or 0,
+                        "completion_tokens": response.usage_metadata.candidates_token_count
+                        or 0,
+                        "total_tokens": response.usage_metadata.total_token_count or 0,
+                    }
+                return LLMResponse(
+                    content="".join(streamed_content),
+                    tool_calls=tool_calls,
+                    model=self.model_name,
+                    usage=usage,
+                )
+
+            content = ""
+            if response and response.candidates and len(response.candidates) > 0:
                 candidate = response.candidates[0]
-                content = ""
 
                 if candidate.content.parts:
                     for part in candidate.content.parts:
-                        if hasattr(part, "text"):
+                        if part.text:
                             content += part.text
 
-                # Note: Google AI doesn't currently support function calling in the same way
-                # as OpenAI/Anthropic, so tool calls are not implemented yet
-                tool_calls = []
+                # Note: Tool calls handling would go here when implemented
 
                 # Extract usage information
                 usage = None
-                if hasattr(response, "usage_metadata"):
+                if response.usage_metadata:
                     usage = {
-                        "prompt_tokens": getattr(
-                            response.usage_metadata, "prompt_token_count", 0
-                        ),
-                        "completion_tokens": getattr(
-                            response.usage_metadata, "candidates_token_count", 0
-                        ),
-                        "total_tokens": getattr(
-                            response.usage_metadata, "total_token_count", 0
-                        ),
+                        "prompt_tokens": response.usage_metadata.prompt_token_count or 0,
+                        "completion_tokens": response.usage_metadata.candidates_token_count
+                        or 0,
+                        "total_tokens": response.usage_metadata.total_token_count or 0,
                     }
 
                 return LLMResponse(
@@ -102,21 +121,24 @@ class GoogleProvider(LLMProvider):
                     model=self.model_name,
                     usage=usage,
                 )
-            else:
-                return LLMResponse(
-                    content="No response generated. Content may have been blocked by safety filters.",
-                    model=self.model_name,
-                )
+
+            return LLMResponse(
+                content=(
+                    "No response generated. Content may have been blocked by safety"
+                    " filters."
+                ),
+                model=self.model_name,
+            )
 
         except Exception as e:
             error_message = str(e)
 
-            # Handle specific Google AI errors
+            # Handle specific Google AI errors - adapting strings as they might have changed
             if "API_KEY_INVALID" in error_message:
                 error_message = (
                     "Invalid Google AI API key. Please check your configuration."
                 )
-            elif "QUOTA_EXCEEDED" in error_message:
+            elif "429" in error_message or "quota" in error_message.lower():
                 error_message = "API quota exceeded. Please try again later."
             elif "blocked" in error_message.lower():
                 error_message = "Content was blocked by Google's safety filters."
@@ -139,41 +161,72 @@ class GoogleProvider(LLMProvider):
 
     def _format_messages_for_provider(
         self, messages: List[Dict[str, str]]
-    ) -> List[str]:
+    ) -> List[types.Content]:
         """Convert OpenAI format messages to Google AI format."""
-        google_messages = []
-        current_content = ""
+        contents = []
+        
+        system_instruction = None
 
         for message in messages:
             role = message["role"]
             content = message["content"]
 
             if role == "system":
-                # Prepend system message as context
-                current_content = f"System: {content}\\n\\n"
+                # In strict chat structure, system messages might need to be handled differently
+                # depending on how we want to use them. The new SDK supports system_instruction
+                # in GenerateContentConfig, but here we are mapping a list of messages.
+                # Common pattern: Prepend to first user message or separate.
+                # However, Gemini 1.5 allows 'system' role or system_instruction.
+                # Let's try to map to 'user'/'model' roles as 'system' often clashes in pure chat history
+                # unless using system_instruction.
+                # For compatibility with the previous logic which merged it:
+                
+                # The previous implementation prepended "System: " to user messages.
+                # We can replicate a similar behavior or use proper parts.
+                
+                parts = [types.Part(text=f"System: {content}")]
+                contents.append(types.Content(role="user", parts=parts))
+                # Add an acknowledgment to simulate system processing if needed, 
+                # or just append to the next user message if we could looking ahead.
+                # To be safe and simple: just send it as a user message.
+                
             elif role == "user":
-                if current_content:
-                    google_messages.append(current_content + f"User: {content}")
-                    current_content = ""
-                else:
-                    google_messages.append(f"User: {content}")
+                parts = [types.Part(text=content)]
+                contents.append(types.Content(role="user", parts=parts))
+                
             elif role == "assistant":
-                google_messages.append(f"Assistant: {content}")
+                parts = [types.Part(text=content)]
+                contents.append(types.Content(role="model", parts=parts))
+                
             elif role == "tool":
-                # Include tool results as context
-                current_content += f"Tool Result: {content}\\n\\n"
+                # Tool results - not fully implemented in this basic migration but 
+                # mapping to 'user' with context explanation
+                parts = [types.Part(text=f"Tool Result: {content}")]
+                contents.append(types.Content(role="user", parts=parts))
 
-        # Handle any remaining content
-        if current_content:
-            if google_messages:
-                google_messages[-1] += "\\n\\n" + current_content
+        # Consolidate adjacent messages of the same role if necessary?
+        # The API usually requires alternating User/Model.
+        # If we have multiple User messages (e.g. System + User), we might need to merge them.
+        
+        merged_contents = []
+        if not contents:
+            return []
+
+        current_content = contents[0]
+        
+        for next_content in contents[1:]:
+            if next_content.role == current_content.role:
+                # Merge parts
+                current_content.parts.extend(next_content.parts)
             else:
-                google_messages.append(current_content)
+                merged_contents.append(current_content)
+                current_content = next_content
+        
+        merged_contents.append(current_content)
 
-        return google_messages
-
+        return merged_contents
+    
     def set_model(self, model: str):
         """Change the model being used."""
         self.model_name = model
         self.config.google_model = model
-        self.model = genai.GenerativeModel(self.model_name)

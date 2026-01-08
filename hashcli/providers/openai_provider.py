@@ -1,7 +1,7 @@
 """OpenAI provider implementation for Hash CLI."""
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import openai
 from openai import AsyncOpenAI
@@ -23,51 +23,97 @@ class OpenAIProvider(LLMProvider):
         self,
         messages: List[Dict[str, str]],
         tools: Optional[List[Dict[str, Any]]] = None,
+        stream_handler: Optional[Callable[[str], None]] = None,
     ) -> LLMResponse:
         """Generate response using OpenAI API."""
 
         try:
+            # Convert tools to Responses API shape if needed
+            response_tools = None
+            if tools:
+                response_tools = []
+                for tool in tools:
+                    if tool.get("type") == "function" and "function" in tool:
+                        function_spec = tool["function"]
+                        response_tools.append(
+                            {
+                                "type": "function",
+                                "name": function_spec.get("name"),
+                                "description": function_spec.get("description"),
+                                "parameters": function_spec.get("parameters"),
+                            }
+                        )
+                    else:
+                        response_tools.append(tool)
+
             # Prepare request parameters
             request_params = {
                 "model": self.model,
-                "messages": messages,
-                "max_completion_tokens": 4096,
+                "input": messages,
+                "max_output_tokens": self.config.max_response_tokens,
             }
 
             # Add tools if provided
-            if tools:
-                request_params["tools"] = tools
+            if response_tools:
+                request_params["tools"] = response_tools
                 request_params["tool_choice"] = "auto"
 
             # Make API call
-            response = await self.client.chat.completions.create(**request_params)
+            streamed_content: List[str] = []
+            if self.config.streaming and stream_handler:
+                async with self.client.responses.stream(**request_params) as stream:
+                    async for event in stream:
+                        event_type = getattr(event, "type", None)
+                        if event_type in (
+                            "response.output_text.delta",
+                            "response.refusal.delta",
+                        ):
+                            delta = getattr(event, "delta", None)
+                            if delta:
+                                streamed_content.append(delta)
+                                stream_handler(delta)
+                    response = await stream.get_final_response()
+            else:
+                response = await self.client.responses.create(**request_params)
 
             # Extract response content
-            message = response.choices[0].message
-            content = message.content or ""
+            content_parts: List[str] = []
 
             # Extract tool calls if present
             tool_calls = []
-            if message.tool_calls:
-                for tool_call in message.tool_calls:
+            for output in response.output or []:
+                output_type = getattr(output, "type", None)
+                if output_type == "message":
+                    for content in output.content:
+                        if content.type == "output_text":
+                            content_parts.append(content.text)
+                        elif content.type == "refusal":
+                            content_parts.append(content.refusal)
+                elif output_type == "function_call":
                     try:
-                        arguments = json.loads(tool_call.function.arguments)
+                        arguments = json.loads(output.arguments)
                         tool_calls.append(
                             ToolCall(
-                                name=tool_call.function.name,
+                                name=output.name,
                                 arguments=arguments,
-                                call_id=tool_call.id,
+                                call_id=output.call_id,
                             )
                         )
                     except json.JSONDecodeError:
-                        # Handle malformed JSON in tool calls
-                        content += f"\\n\\nNote: Malformed tool call arguments: {tool_call.function.arguments}"
+                        content_parts.append(
+                            "\\n\\nNote: Malformed tool call arguments:"
+                            f" {output.arguments}"
+                        )
+
+            content = "".join(content_parts)
+            if not content and streamed_content:
+                content = "".join(streamed_content)
 
             # Extract usage information
             usage = (
                 {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
+                    "prompt_tokens": response.usage.input_tokens,
+                    "completion_tokens": response.usage.output_tokens,
                     "total_tokens": response.usage.total_tokens,
                 }
                 if response.usage

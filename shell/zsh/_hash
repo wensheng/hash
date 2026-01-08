@@ -1,0 +1,194 @@
+#compdef hash
+#autoload
+
+# Hash CLI completion system for zsh
+# Provides intelligent completions for both LLM and command proxy modes
+
+_hash() {
+    local context state line ret=1
+    local -a arguments
+    
+    # Get the current buffer content after #
+    local buffer_content="$BUFFER"
+    
+    # Check if we're completing a hash command (starts with #)
+    if [[ "$buffer_content" =~ ^[[:space:]]*#[[:space:]]* ]]; then
+        # Extract content after # and whitespace
+        local hash_content
+        hash_content="${buffer_content#*#}"
+        hash_content="${hash_content#"${hash_content%%[![:space:]]*}"}"
+        
+        # Mode detection: check if starts with /
+        if [[ "$hash_content" =~ ^[[:space:]]*/ ]]; then
+            _hash_command_proxy_mode "$hash_content"
+        else
+            _hash_llm_mode "$hash_content"
+        fi
+    else
+        # Not a hash command, provide general completions
+        _alternative \
+            'commands:available commands:(hashcli)' \
+            'files:files:_files'
+    fi
+}
+
+# Command proxy mode completions
+_hash_command_proxy_mode() {
+    local proxy_content="$1"
+    local proxy_cmd proxy_args
+    
+    # Extract the command name (after /)
+    proxy_cmd="${proxy_content#*/}"
+    proxy_cmd="${proxy_cmd%% *}"
+    
+    # Extract arguments if any
+    if [[ "$proxy_content" == *" "* ]]; then
+        proxy_args="${proxy_content#*/ *}"
+    fi
+    
+    case "$proxy_cmd" in
+        ls)
+            # File and directory completions for ls command
+            _arguments \
+                '*:files and directories:_files' \
+                '(-l --long)'{-l,--long}'[use long listing format]' \
+                '(-a --all)'{-a,--all}'[show hidden files]' \
+                '(-h --human-readable)'{-h,--human-readable}'[human readable sizes]'
+            ;;
+        model)
+            # Available LLM models
+            local -a models
+            models=(
+                'gpt-4:OpenAI GPT-4 model'
+                'gpt-4-turbo:OpenAI GPT-4 Turbo model'
+                'gpt-3.5-turbo:OpenAI GPT-3.5 Turbo model'
+                'claude-3-opus:Anthropic Claude 3 Opus'
+                'claude-3-sonnet:Anthropic Claude 3 Sonnet'
+                'claude-3-haiku:Anthropic Claude 3 Haiku'
+                'gemini-pro:Google Gemini Pro'
+                'gemini-1.5-pro:Google Gemini 1.5 Pro'
+            )
+            _describe 'available models' models
+            ;;
+        fix)
+            # Code fixing options and file completions
+            local -a fix_options
+            fix_options=(
+                'bug:Fix a bug in code'
+                'error:Resolve an error or exception'
+                'performance:Optimize performance issues'
+                'security:Address security vulnerabilities'
+                'style:Fix code style and formatting'
+                'logic:Fix logical errors'
+                'syntax:Fix syntax errors'
+            )
+            if [[ -z "$proxy_args" ]]; then
+                _describe 'fix options' fix_options
+            else
+                _files -g "*.py *.js *.ts *.go *.rs *.java *.cpp *.c *.rb *.php"
+            fi
+            ;;
+        config)
+            # Configuration management options
+            local -a config_options
+            config_options=(
+                'show:Show current configuration'
+                'set:Set configuration value'
+                'get:Get configuration value'
+                'list:List all configuration keys'
+                'reset:Reset to defaults'
+            )
+            _describe 'configuration options' config_options
+            ;;
+        clear)
+            # No additional completions for clear
+            ;;
+        help)
+            # Help topics
+            local -a help_topics
+            help_topics=(
+                'commands:Available commands'
+                'config:Configuration help'
+                'models:Available models'
+                'tools:Available tools'
+            )
+            _describe 'help topics' help_topics
+            ;;
+        *)
+            # For unknown proxy commands, provide generic command completions
+            if [[ -z "$proxy_cmd" ]]; then
+                # List available slash commands
+                local -a slash_commands
+                slash_commands=(
+                    'ls:List directory contents'
+                    'clear:Clear conversation history'
+                    'model:Switch LLM model'
+                    'fix:Get coding assistance'
+                    'help:Show available commands'
+                    'config:Manage configuration'
+                )
+                _describe 'available commands' slash_commands -p '/'
+            else
+                # Try system command completion
+                _command_names -e
+            fi
+            ;;
+    esac
+}
+
+# LLM mode completions
+_hash_llm_mode() {
+    local llm_content="$1"
+    local -a llm_suggestions
+    
+    # Provide contextual suggestions based on partial input
+    llm_suggestions=(
+        'how do I...:General how-to questions'
+        'explain this error::Error explanation and troubleshooting'
+        'help me with...:General assistance requests'
+        'troubleshoot...:System and software troubleshooting'
+        'optimize...:Performance optimization advice'
+        'find files...:File search and location help'
+        'fix permission issues:Resolve file/directory permission problems'
+        'debug this code::Code debugging assistance'
+        'review my code::Code review and improvement suggestions'
+        'convert this...:Data or code conversion help'
+        'automate this task::Task automation guidance'
+        'secure my system::Security best practices and hardening'
+        'backup my data::Data backup and recovery strategies'
+        'monitor system performance::Performance monitoring setup'
+        'configure...:Configuration and setup guidance'
+        'install...:Software installation help'
+        'update...:Software update procedures'
+        'network connectivity issues:Network troubleshooting'
+        'git commands help:Git version control assistance'
+        'docker container...:Docker containerization help'
+        'kubernetes...:Kubernetes orchestration guidance'
+        'database query...:Database query optimization'
+        'API integration...:API development and integration'
+        'testing strategy...:Software testing approaches'
+        'deployment...:Application deployment guidance'
+    )
+    
+    # Filter suggestions based on partial input
+    if [[ -n "$llm_content" ]]; then
+        local -a filtered_suggestions
+        local suggestion
+        for suggestion in "${llm_suggestions[@]}"; do
+            local key="${suggestion%%:*}"
+            if [[ "$key" == *"$llm_content"* ]] || [[ "$llm_content" == *"${key%% *}"* ]]; then
+                filtered_suggestions+=("$suggestion")
+            fi
+        done
+        if (( ${#filtered_suggestions[@]} > 0 )); then
+            _describe 'common queries' filtered_suggestions
+        else
+            _describe 'common queries' llm_suggestions
+        fi
+    else
+        _describe 'common queries' llm_suggestions
+    fi
+}
+
+# Register the completion function
+_hash "$@"

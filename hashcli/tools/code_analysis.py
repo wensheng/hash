@@ -146,13 +146,11 @@ class CodeAnalysisTool(Tool):
         # Estimate lines (rough)
         try:
             with open(path, "r") as f:
-                metrics["lines"] = len(
-                    [
-                        line
-                        for line in f
-                        if line.strip() and not line.strip().startswith("#")
-                    ]
-                )
+                metrics["lines"] = len([
+                    line
+                    for line in f
+                    if line.strip() and not line.strip().startswith("#")
+                ])
         except:
             pass
 
@@ -250,15 +248,13 @@ class CodeAnalysisTool(Tool):
                 [line for line in lines if "function" in line or "=>" in line]
             )
             classes = len([line for line in lines if line.strip().startswith("class ")])
-            imports = len(
-                [
-                    line
-                    for line in lines
-                    if line.strip().startswith("import ")
-                    or line.strip().startswith("const ")
-                    and "require(" in line
-                ]
-            )
+            imports = len([
+                line
+                for line in lines
+                if line.strip().startswith("import ")
+                or line.strip().startswith("const ")
+                and "require(" in line
+            ])
 
             result = f"JavaScript analysis for {path.name}:\\n\\n"
             result += f"Total lines: {len(lines)}\\n"
@@ -283,15 +279,13 @@ class CodeAnalysisTool(Tool):
             classes = len(
                 [line for line in lines if "class " in line and "public" in line]
             )
-            methods = len(
-                [
-                    line
-                    for line in lines
-                    if ("public " in line or "private " in line)
-                    and "(" in line
-                    and ")" in line
-                ]
-            )
+            methods = len([
+                line
+                for line in lines
+                if ("public " in line or "private " in line)
+                and "(" in line
+                and ")" in line
+            ])
             imports = len(
                 [line for line in lines if line.strip().startswith("import ")]
             )

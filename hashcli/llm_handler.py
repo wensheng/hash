@@ -3,7 +3,7 @@
 import asyncio
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from rich.console import Console
 from rich.prompt import Confirm
@@ -58,7 +58,9 @@ class LLMHandler:
         )
         self.current_session_id = None
 
-    async def chat(self, message: str) -> str:
+    async def chat(
+        self, message: str, stream_handler: Optional[Callable[[str], None]] = None
+    ) -> str:
         """Main chat interface that handles the complete conversation flow."""
         try:
             # Start new session if needed
@@ -74,12 +76,16 @@ class LLMHandler:
 
             # Get LLM response
             response = await self.provider.generate_response(
-                messages=context_messages, tools=self._get_available_tools()
+                messages=context_messages,
+                tools=self._get_available_tools(),
+                stream_handler=stream_handler if self.config.streaming else None,
             )
 
             # Handle tool calls if present
             if response.has_tool_calls():
-                response = await self._handle_tool_calls(response, context_messages)
+                response = await self._handle_tool_calls(
+                    response, context_messages, stream_handler
+                )
 
             # Add assistant response to history
             if self.history:
@@ -128,7 +134,7 @@ class LLMHandler:
 
     def _get_system_prompt(self) -> str:
         """Get the system prompt for the LLM."""
-        return """You are Hash, an intelligent terminal assistant designed to help users with command-line tasks, programming, system administration, and general technical questions.
+        return f"""You are Hash, an intelligent terminal assistant designed to help users with command-line tasks, programming, system administration, and general technical questions.
 
 Key capabilities:
 - Execute shell commands (with user permission)
@@ -139,7 +145,7 @@ Key capabilities:
 - Explain complex technical concepts
 
 Guidelines:
-- Be concise but thorough in your responses
+- Be concise and keep responses under {self.config.max_response_tokens} tokens unless the user explicitly requests more
 - Always ask for confirmation before executing potentially destructive commands
 - Provide command explanations when helpful
 - Suggest alternatives when appropriate
@@ -154,100 +160,104 @@ You have access to tools that can interact with the system. Use them appropriate
 
         # Shell command execution tool
         if self.config.allow_command_execution:
-            tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "execute_shell_command",
-                        "description": "Execute a shell command and return its output. Use with caution.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "command": {
-                                    "type": "string",
-                                    "description": "The shell command to execute",
-                                },
-                                "description": {
-                                    "type": "string",
-                                    "description": "Brief description of what this command does",
-                                },
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": "execute_shell_command",
+                    "description": (
+                        "Execute a shell command and return its output. Use with"
+                        " caution."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": "The shell command to execute",
                             },
-                            "required": ["command", "description"],
+                            "description": {
+                                "type": "string",
+                                "description": (
+                                    "Brief description of what this command does"
+                                ),
+                            },
                         },
+                        "required": ["command", "description"],
                     },
-                }
-            )
+                },
+            })
 
         # File system operations
-        tools.extend(
-            [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "read_file",
-                        "description": "Read the contents of a text file",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": {
-                                    "type": "string",
-                                    "description": "Path to the file to read",
-                                }
-                            },
-                            "required": ["file_path"],
+        tools.extend([
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read the contents of a text file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "file_path": {
+                                "type": "string",
+                                "description": "Path to the file to read",
+                            }
                         },
+                        "required": ["file_path"],
                     },
                 },
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "write_file",
-                        "description": "Write content to a text file",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": {
-                                    "type": "string",
-                                    "description": "Path to the file to write",
-                                },
-                                "content": {
-                                    "type": "string",
-                                    "description": "Content to write to the file",
-                                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "description": "Write content to a text file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "file_path": {
+                                "type": "string",
+                                "description": "Path to the file to write",
                             },
-                            "required": ["file_path", "content"],
+                            "content": {
+                                "type": "string",
+                                "description": "Content to write to the file",
+                            },
                         },
+                        "required": ["file_path", "content"],
                     },
                 },
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "list_directory",
-                        "description": "List contents of a directory",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "directory_path": {
-                                    "type": "string",
-                                    "description": "Path to the directory to list",
-                                },
-                                "show_hidden": {
-                                    "type": "boolean",
-                                    "description": "Whether to show hidden files",
-                                    "default": False,
-                                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_directory",
+                    "description": "List contents of a directory",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "directory_path": {
+                                "type": "string",
+                                "description": "Path to the directory to list",
                             },
-                            "required": ["directory_path"],
+                            "show_hidden": {
+                                "type": "boolean",
+                                "description": "Whether to show hidden files",
+                                "default": False,
+                            },
                         },
+                        "required": ["directory_path"],
                     },
                 },
-            ]
-        )
+            },
+        ])
 
         return tools
 
     async def _handle_tool_calls(
-        self, response: LLMResponse, context_messages: List[Dict[str, str]]
+        self,
+        response: LLMResponse,
+        context_messages: List[Dict[str, str]],
+        stream_handler: Optional[Callable[[str], None]] = None,
     ) -> LLMResponse:
         """Handle tool calls from the LLM response."""
         from .tools import get_tool_executor
@@ -258,12 +268,10 @@ You have access to tools that can interact with the system. Use them appropriate
             # Get user confirmation if required
             if self.config.require_confirmation:
                 if not self._get_user_confirmation(tool_call):
-                    tool_results.append(
-                        {
-                            "tool_call_id": tool_call.call_id,
-                            "output": "User declined to execute this tool call.",
-                        }
-                    )
+                    tool_results.append({
+                        "tool_call_id": tool_call.call_id,
+                        "output": "User declined to execute this tool call.",
+                    })
                     continue
 
             # Execute tool call
@@ -276,31 +284,27 @@ You have access to tools that can interact with the system. Use them appropriate
                 )
 
             except Exception as e:
-                tool_results.append(
-                    {
-                        "tool_call_id": tool_call.call_id,
-                        "output": f"Error executing tool: {e}",
-                    }
-                )
+                tool_results.append({
+                    "tool_call_id": tool_call.call_id,
+                    "output": f"Error executing tool: {e}",
+                })
 
         # Get follow-up response from LLM with tool results
-        tool_call_messages = [
-            {
-                "role": "assistant",
-                "content": response.content,
-                "tool_calls": [
-                    {
-                        "id": tc.call_id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments),
-                        },
-                    }
-                    for tc in response.tool_calls
-                ],
-            }
-        ]
+        tool_call_messages = [{
+            "role": "assistant",
+            "content": response.content,
+            "tool_calls": [
+                {
+                    "id": tc.call_id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.name,
+                        "arguments": json.dumps(tc.arguments),
+                    },
+                }
+                for tc in response.tool_calls
+            ],
+        }]
         tool_result_messages = [
             {
                 "role": "tool",
@@ -313,7 +317,10 @@ You have access to tools that can interact with the system. Use them appropriate
             context_messages + tool_call_messages + tool_result_messages
         )
 
-        follow_up_response = await self.provider.generate_response(messages_with_tools)
+        follow_up_response = await self.provider.generate_response(
+            messages_with_tools,
+            stream_handler=stream_handler if self.config.streaming else None,
+        )
         return follow_up_response
 
     def _get_user_confirmation(self, tool_call: ToolCall) -> bool:

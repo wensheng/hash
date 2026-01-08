@@ -75,7 +75,10 @@ For command-specific help: /help <command>"""
             return f"Help for /{command_name}:\\n\\n{command_help}"
         else:
             available_commands = ", ".join(proxy.get_available_commands())
-            return f"Unknown command: /{command_name}\\n\\nAvailable commands: {available_commands}\\n\\nUse '/help' for full help."
+            return (
+                f"Unknown command: /{command_name}\\n\\nAvailable commands:"
+                f" {available_commands}\\n\\nUse '/help' for full help."
+            )
 
     def get_help(self) -> str:
         """Get help text for the help command."""

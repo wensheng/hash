@@ -90,7 +90,10 @@ class ModelCommand(Command):
                 target_provider = LLMProvider.GOOGLE
 
         if not target_provider:
-            return f"Unknown model: {model_name}\\nUse '/model list' to see available models"
+            return (
+                f"Unknown model: {model_name}\\nUse '/model list' to see available"
+                " models"
+            )
 
         # Update configuration
         config.llm_provider = target_provider
@@ -104,7 +107,11 @@ class ModelCommand(Command):
 
         # Validate API key exists
         if not config.get_current_api_key():
-            return f"Model set to {model_name} ({target_provider.value}), but no API key configured.\\nSet HASHCMD_{target_provider.value.upper()}_API_KEY environment variable."
+            return (
+                f"Model set to {model_name} ({target_provider.value}), but no API key"
+                f" configured.\\nSet HASHCMD_{target_provider.value.upper()}_API_KEY"
+                " environment variable."
+            )
 
         return f"Switched to {model_name} ({target_provider.value})"
 
@@ -115,14 +122,21 @@ class ModelCommand(Command):
         try:
             target_provider = LLMProvider(provider_name)
         except ValueError:
-            return f"Unknown provider: {provider_name}\\nAvailable: openai, anthropic, google"
+            return (
+                f"Unknown provider: {provider_name}\\nAvailable: openai, anthropic,"
+                " google"
+            )
 
         # Update configuration
         config.llm_provider = target_provider
 
         # Validate API key exists
         if not config.get_current_api_key():
-            return f"Switched to {target_provider.value}, but no API key configured.\\nSet HASHCMD_{target_provider.value.upper()}_API_KEY environment variable."
+            return (
+                f"Switched to {target_provider.value}, but no API key configured.\\nSet"
+                f" HASHCMD_{target_provider.value.upper()}_API_KEY environment"
+                " variable."
+            )
 
         current_model = config.get_current_model()
         return f"Switched to {target_provider.value} (model: {current_model})"
