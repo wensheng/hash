@@ -1,1 +1,1 @@
-recursive-include shell *
+recursive-include hashcli/shell *

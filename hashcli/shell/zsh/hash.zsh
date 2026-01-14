@@ -10,17 +10,20 @@ hash-magic-execute() {
         zle .accept-line
     # Check if buffer starts with #
     elif [[ "$BUFFER" =~ ^[[:space:]]*# ]]; then
+        # Save the original buffer for history
+        local original_buffer="$BUFFER"
+
         # Extract command after #
         local cmd="${BUFFER#*#}"
         cmd="${cmd#"${cmd%%[![:space:]]*}"}"  # Trim leading whitespace
-        
+
         # Execute hashcli with the command
         if [[ -n "$cmd" ]]; then
             echo  # New line for output
             hashcli "$cmd"
             local exit_code=$?
             echo  # Another new line
-            
+
             # Show exit status if non-zero
             if [[ $exit_code -ne 0 ]]; then
                 echo "Exit code: $exit_code"
@@ -31,7 +34,10 @@ hash-magic-execute() {
             hashcli "/help"
             echo  # Another new line
         fi
-        
+
+        # Add to shell history
+        print -s "$original_buffer"
+
         # Clear buffer and reset
         BUFFER=""
         zle reset-prompt

@@ -13,6 +13,11 @@ function hash_magic_execute --description "Execute hash commands with # prefix"
             echo  # Another new line
         end
 
+        # Add to shell history
+        if test -n "$current_buffer"
+            history --add -- "$current_buffer"
+        end
+
         # Clear the command line
         commandline ""
     else

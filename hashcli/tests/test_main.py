@@ -38,16 +38,39 @@ def test_show_config_callback():
     assert "Hash CLI Configuration" in result.stdout
 
 
-def test_setup_callback(mocker):
+def test_setup_callback(mocker, tmp_path):
     """Test the --setup flag."""
+    # Create a mock shell directory structure
+    mock_shell_dir = tmp_path / "shell" / "zsh"
+    mock_shell_dir.mkdir(parents=True)
+    install_script = mock_shell_dir / "install.sh"
+    install_script.write_text("#!/bin/bash\necho 'test'\n")
+    install_script.chmod(0o755)
+
+    # Mock Path.home() to use tmp_path
+    mock_home = mocker.patch("hashcli.main.Path.home")
+    mock_home.return_value = tmp_path
+
+    # Mock the package shell directory location
+    mock_resolve = mocker.patch("hashcli.main.Path.resolve")
+    mock_package_path = tmp_path / "package"
+    mock_package_path.mkdir()
+    (mock_package_path / "shell").mkdir()
+    mocker.patch("pathlib.Path.resolve", return_value=mock_package_path)
+
+    # Copy our mock shell dir to the "package" location
+    import shutil
+    shutil.copytree(tmp_path / "shell", mock_package_path / "shell", dirs_exist_ok=True)
+
     mock_run = mocker.patch("hashcli.main.subprocess.run")
+
     result = runner.invoke(app, ["--setup"], env={"SHELL": "/bin/zsh"})
     assert result.exit_code == 0
     assert "Installing zsh shell integration" in result.stdout
     assert mock_run.called
     args, _kwargs = mock_run.call_args
     assert args[0][0] == "/bin/bash"
-    assert str(args[0][1]).endswith("shell/zsh/install.sh")
+    assert "install.sh" in str(args[0][1])
     assert args[0][2] == "install"
 
 

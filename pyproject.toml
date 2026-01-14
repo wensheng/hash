@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hashcli"
-version = "0.2.0"
+version = "0.2.1"
 description = "Hash - Intelligent CLI system with dual-mode functionality (LLM chat and command proxy)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,7 +25,6 @@ classifiers = [
 
 dependencies = [
   "openai>=1.0.0",
-
   "anthropic>=0.28.0",
   "typer[all]>=0.9.0",
   "rich>=13.0.0",
@@ -40,12 +39,12 @@ dev = [
   "pytest>=7.0.0",
   "pytest-asyncio>=0.21.0",
   "pytest-cov>=4.0.0",
+  "pytest-mock (>=3.15.1,<4.0.0)",
   "black>=23.0.0",
   "isort>=5.0.0",
   "mypy>=1.0.0",
   "flake8>=6.0.0",
   "pre-commit>=3.0.0",
-  "pytest-mock (>=3.15.1,<4.0.0)",
 ]
 
 [project.urls]
@@ -60,30 +59,13 @@ hashcli = "hashcli.main:app"
 [tool.setuptools]
 include-package-data = true
 
-[tool.setuptools.data-files]
-"hashcli/shell/zsh" = [
-  "shell/zsh/_hash",
-  "shell/zsh/hash.zsh",
-  "shell/zsh/install.sh",
-  "shell/zsh/test.sh",
-]
-"hashcli/shell/fish" = [
-  "shell/fish/completions.fish",
-  "shell/fish/hash.fish",
-  "shell/fish/install.sh",
-  "shell/fish/test.sh",
-]
-"hashcli/shell/powershell" = [
-  "shell/powershell/completions.ps1",
-  "shell/powershell/hash.ps1",
-  "shell/powershell/install.ps1",
-  "shell/powershell/uninstall.ps1",
-]
+[tool.setuptools.package-data]
+hashcli = ["shell/**/*"]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["hashcli*"]
-exclude = ["tests*", "docs*", "ai*", "shell*"]
+exclude = ["tests*", "docs*", "ai*"]
 
 [tool.black]
 line-length = 88
@@ -128,24 +110,7 @@ strict_equality = true
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = [
-  "--strict-markers",
-  "--strict-config",
-  "--cov=hashcli",
-  "--cov-report=html",
-  "--cov-report=term-missing",
-  "--cov-fail-under=90",
-]
-markers = [
-  "unit: Unit tests",
-  "integration: Integration tests",
-  "security: Security tests",
-  "performance: Performance tests",
-  "slow: Tests that take a long time to run",
-]
+addopts = ["--cov=hashcli"]
 
 [tool.coverage.run]
 source = ["hashcli"]

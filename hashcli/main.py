@@ -216,9 +216,10 @@ def setup_callback(value: bool):
     shell_env = os.environ.get("SHELL", "")
     shell_name = Path(shell_env).name
 
-    if shell_name != "zsh":
+    # Support zsh and bash
+    if shell_name not in ("zsh", "bash"):
         console.print(
-            "[yellow]Shell integration setup currently supports zsh only.[/yellow]"
+            "[yellow]Shell integration setup currently supports zsh and bash only.[/yellow]"
         )
         console.print(
             f"Detected shell: [dim]{shell_name or 'unknown'}[/dim]"
@@ -226,23 +227,47 @@ def setup_callback(value: bool):
         console.print("For other shells, use the scripts in the shell directory.")
         raise typer.Exit(1)
 
-    module_dir = Path(__file__).resolve().parent
-    candidate_paths = [
-        module_dir / "shell" / "zsh" / "install.sh",
-        module_dir.parent / "shell" / "zsh" / "install.sh",
-    ]
+    # Copy shell scripts to ~/.hashcli/shell/ if not already there
+    user_shell_dir = Path.home() / ".hashcli" / "shell"
+    install_script = user_shell_dir / shell_name / "install.sh"
 
-    script_path = next((path for path in candidate_paths if path.is_file()), None)
-    if script_path is None:
-        console.print(
-            "[bold red]Unable to locate zsh install script.[/bold red]"
-        )
-        raise typer.Exit(1)
+    if not install_script.exists():
+        console.print("[dim]Setting up shell integration scripts...[/dim]")
+        try:
+            # Create directory structure
+            user_shell_dir.mkdir(parents=True, exist_ok=True)
 
-    console.print("[bold blue]Installing zsh shell integration...[/bold blue]")
+            # Copy shell scripts from package to user directory
+            module_dir = Path(__file__).resolve().parent
+            package_shell_dir = module_dir / "shell"
+
+            if package_shell_dir.exists():
+                # Copy the entire shell directory
+                import shutil
+                shutil.copytree(package_shell_dir, user_shell_dir, dirs_exist_ok=True)
+                # Make scripts executable
+                for script in user_shell_dir.rglob("*.sh"):
+                    script.chmod(0o755)
+                # Make bash scripts executable
+                for script in user_shell_dir.rglob("*.bash"):
+                    script.chmod(0o755)
+                console.print(f"[dim]Shell scripts copied to {user_shell_dir}[/dim]")
+            else:
+                console.print(
+                    "[bold red]Unable to locate shell scripts in package.[/bold red]"
+                )
+                raise typer.Exit(1)
+        except Exception as e:
+            console.print(
+                f"[bold red]Failed to copy shell scripts:[/bold red] {e}"
+            )
+            raise typer.Exit(1)
+
+    # Run install script from user directory
+    console.print(f"[bold blue]Installing {shell_name} shell integration...[/bold blue]")
     try:
         subprocess.run(
-            ["/bin/bash", str(script_path), "install"],
+            ["/bin/bash", str(install_script), "install"],
             check=True,
         )
     except subprocess.CalledProcessError as exc:
