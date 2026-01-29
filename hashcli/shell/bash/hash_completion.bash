@@ -76,7 +76,7 @@ _hash_command_proxy_mode() {
             ;;
         "")
             # List available slash commands
-            local slash_commands="ls clear model fix help config"
+            local slash_commands="ls clear model fix help config tldr"
             COMPREPLY=( $(compgen -W "$slash_commands" -P "/" -- "${cur#/}") )
             ;;
         *)

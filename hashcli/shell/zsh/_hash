@@ -124,6 +124,7 @@ _hash_command_proxy_mode() {
                     'clear:Clear conversation history'
                     'model:Switch LLM model'
                     'fix:Get coding assistance'
+                    'tldr:Show quick command examples'
                     'help:Show available commands'
                     'config:Manage configuration'
                 )

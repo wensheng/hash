@@ -14,14 +14,12 @@ from .command_proxy import CommandProxy
 from .config import HashConfig
 from .history import ConversationHistory
 from .llm_handler import LLMHandler
-from .main import app
 
 __version__ = "0.1.0"
 __author__ = "Hash CLI Team"
 __email__ = "team@hashcli.dev"
 
 __all__ = [
-    "app",
     "HashConfig",
     "LLMHandler",
     "CommandProxy",

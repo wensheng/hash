@@ -7,6 +7,7 @@ from hashcli.command_proxy import CommandProxy, Command
 from hashcli.commands.ls import LSCommand
 from hashcli.commands.clear import ClearCommand
 from hashcli.commands.help import HelpCommand
+from hashcli.commands.tldr import TLDRCommand
 
 
 class TestCommandProxy:
@@ -24,6 +25,7 @@ class TestCommandProxy:
             "clear",
             "model",
             "fix",
+            "tldr",
             "help",
             "config",
             "history",
@@ -106,6 +108,26 @@ class TestLSCommand:
             )
 
             result = ls_cmd.execute([], sample_config)
+            assert mock_run.called
+
+
+class TestTLDRCommand:
+    """Test the TLDR command."""
+
+    def test_tldr_command_basic(self, sample_config):
+        """Test basic TLDR command execution."""
+        tldr_cmd = TLDRCommand()
+
+        with patch("hashcli.commands.tldr.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                stdout="tar -cf archive.tar file1 file2\\n",
+                stderr="",
+                returncode=0,
+            )
+
+            result = tldr_cmd.execute(["tar"], sample_config)
+
+            assert "tar -cf archive.tar" in result
             assert mock_run.called
 
     def test_ls_command_with_args(self, sample_config):

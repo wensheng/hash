@@ -16,18 +16,21 @@ class OpenAIProvider(LLMProvider):
 
     def __init__(self, config: HashConfig):
         super().__init__(config)
-        self.client = AsyncOpenAI(api_key=config.openai_api_key)
+        self.client = AsyncOpenAI(api_key=config.openai_api_key, base_url=config.openai_base_url)
         self.model = config.openai_model
 
     async def generate_response(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
         stream_handler: Optional[Callable[[str], None]] = None,
     ) -> LLMResponse:
         """Generate response using OpenAI API."""
 
         try:
+            # Convert chat-style messages (with tool_calls/tool results) to Responses input items.
+            input_items = self._format_messages_for_responses(messages)
+
             # Convert tools to Responses API shape if needed
             response_tools = None
             if tools:
@@ -49,7 +52,7 @@ class OpenAIProvider(LLMProvider):
             # Prepare request parameters
             request_params = {
                 "model": self.model,
-                "input": messages,
+                "input": input_items,
                 "max_output_tokens": self.config.max_response_tokens,
             }
 
@@ -138,6 +141,57 @@ class OpenAIProvider(LLMProvider):
             return LLMResponse(content=f"OpenAI API error: {str(e)}", model=self.model)
         except Exception as e:
             return LLMResponse(content=f"Unexpected error: {str(e)}", model=self.model)
+
+    def _format_messages_for_responses(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Convert OpenAI chat-format messages to Responses API input items."""
+        input_items: List[Dict[str, Any]] = []
+
+        for message in messages:
+            role = message.get("role")
+            content = message.get("content", "")
+
+            # Map standard roles to easy input messages.
+            if role in ("system", "user", "assistant", "developer"):
+                if content:
+                    input_items.append({"role": role, "content": content})
+
+            # Map assistant tool calls to function_call items.
+            tool_calls = message.get("tool_calls") or []
+            for tool_call in tool_calls:
+                func = tool_call.get("function", {})
+                call_id = tool_call.get("id") or tool_call.get("call_id")
+                name = func.get("name")
+                arguments = func.get("arguments")
+                if call_id and name and arguments is not None:
+                    input_items.append(
+                        {
+                            "type": "function_call",
+                            "call_id": call_id,
+                            "name": name,
+                            "arguments": arguments,
+                        }
+                    )
+
+            # Map tool outputs to function_call_output items.
+            if role == "tool":
+                call_id = message.get("tool_call_id") or message.get("call_id")
+                if call_id:
+                    input_items.append(
+                        {
+                            "type": "function_call_output",
+                            "call_id": call_id,
+                            "output": content or "",
+                        }
+                    )
+                elif content:
+                    # Fallback to preserve tool output if call_id is missing.
+                    input_items.append(
+                        {"role": "user", "content": f"Tool result: {content}"}
+                    )
+
+        return input_items
 
     def get_model_name(self) -> str:
         """Get the current model name."""

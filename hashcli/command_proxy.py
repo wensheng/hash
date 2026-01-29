@@ -90,6 +90,7 @@ class CommandProxy:
             HelpCommand,
             LSCommand,
             ModelCommand,
+            TLDRCommand,
         )
 
         return {
@@ -100,6 +101,7 @@ class CommandProxy:
             "fix": FixCommand(),
             "help": HelpCommand(),
             "config": ConfigCommand(),
+            "tldr": TLDRCommand(),
             "history": HistoryCommand(),
             "exit": ExitCommand(),
             "quit": ExitCommand(),

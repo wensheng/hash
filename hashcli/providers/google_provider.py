@@ -20,7 +20,7 @@ class GoogleProvider(LLMProvider):
 
     async def generate_response(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
         stream_handler: Optional[Callable[[str], None]] = None,
     ) -> LLMResponse:

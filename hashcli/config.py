@@ -34,6 +34,7 @@ class HashConfig(BaseModel):
         default=LLMProvider.OPENAI, description="Default LLM provider"
     )
     openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
+    openai_base_url: Optional[str] = Field(default=None, description="OpenAI base URL")
     openai_model: str = Field(default="gpt-5-nano", description="Default OpenAI model")
     anthropic_api_key: Optional[str] = Field(
         default=None, description="Anthropic API key"

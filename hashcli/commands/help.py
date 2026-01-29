@@ -32,6 +32,7 @@ AVAILABLE COMMANDS:
   /clear [options]            - Clear conversation history  
   /model [options]            - Switch LLM models and providers
   /fix <description>          - Get coding assistance
+  /tldr <command>             - Show quick command examples
   /help [command]             - Show help (this message)
   /config                     - Show current configuration
   /history [options]          - Manage conversation history
@@ -48,6 +49,7 @@ EXAMPLES:
   hashcli /model set gpt-5-mini
   hashcli /clear --days 7
   hashcli /fix my tests are failing
+  hashcli /tldr tar
 
 GETTING STARTED:
   1. Set API key: export OPENAI_API_KEY="your-key"

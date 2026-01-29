@@ -152,6 +152,12 @@ Guidelines:
 - Prioritize security and best practices
 - Indicate when you're unsure and suggest verification steps
 
+Tool usage policy:
+- When a question can be answered deterministically by a tool, call the tool first and answer from its output.
+- If the answer depends on the current system state, date/time, or filesystem, call a tool.
+- For time/date questions (e.g., "what day is today", "current time"), use the execute_shell_command tool (e.g., `date` or `date +%A`) and answer using its output.
+- If a user asks something that can be checked locally (e.g., current directory, username, OS info, available files), use the appropriate tool instead of guessing.
+
 You have access to tools that can interact with the system. Use them appropriately to assist the user effectively."""
 
     def _get_available_tools(self) -> List[Dict[str, Any]]:
