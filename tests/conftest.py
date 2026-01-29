@@ -17,7 +17,7 @@ def temp_dir():
     shutil.rmtree(temp_path)
 
 
-@pytest.fixture  
+@pytest.fixture
 def sample_config():
     """Create a sample configuration for testing."""
     config = HashConfig(
@@ -27,7 +27,7 @@ def sample_config():
         allow_command_execution=True,
         require_confirmation=False,  # Disable for testing
         history_enabled=True,
-        show_debug=False
+        show_debug=False,
     )
     return config
 
@@ -37,9 +37,7 @@ def mock_llm_provider():
     """Create a mock LLM provider for testing."""
     provider = MagicMock()
     provider.generate_response.return_value = MagicMock(
-        content="Test response",
-        tool_calls=[],
-        model="test-model"
+        content="Test response", tool_calls=[], model="test-model"
     )
     return provider
 
@@ -48,23 +46,23 @@ def mock_llm_provider():
 def setup_test_environment(temp_dir):
     """Set up test environment variables."""
     import os
-    
+
     # Set test API keys
-    os.environ['HASHCLI_OPENAI_API_KEY'] = 'test-key-openai'
-    os.environ['HASHCLI_ANTHROPIC_API_KEY'] = 'test-key-anthropic'  
-    os.environ['HASHCLI_GOOGLE_API_KEY'] = 'test-key-google'
-    
+    os.environ["HASHCLI_OPENAI_API_KEY"] = "test-key-openai"
+    os.environ["HASHCLI_ANTHROPIC_API_KEY"] = "test-key-anthropic"
+    os.environ["HASHCLI_GOOGLE_API_KEY"] = "test-key-google"
+
     # Set test history directory
-    os.environ['HASHCLI_HISTORY_DIR'] = str(temp_dir / "history")
-    
+    os.environ["HASHCLI_HISTORY_DIR"] = str(temp_dir / "history")
+
     yield
-    
+
     # Clean up environment
     test_keys = [
-        'HASHCLI_OPENAI_API_KEY', 
-        'HASHCLI_ANTHROPIC_API_KEY',
-        'HASHCLI_GOOGLE_API_KEY',
-        'HASHCLI_HISTORY_DIR'
+        "HASHCLI_OPENAI_API_KEY",
+        "HASHCLI_ANTHROPIC_API_KEY",
+        "HASHCLI_GOOGLE_API_KEY",
+        "HASHCLI_HISTORY_DIR",
     ]
     for key in test_keys:
         if key in os.environ:
