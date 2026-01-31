@@ -100,8 +100,8 @@ _hash_command_proxy_mode() {
             )
             _describe 'configuration options' config_options
             ;;
-        clear)
-            # No additional completions for clear
+        clean)
+            # No additional completions for clean
             ;;
         help)
             # Help topics
@@ -120,8 +120,7 @@ _hash_command_proxy_mode() {
                 # List available slash commands
                 local -a slash_commands
                 slash_commands=(
-                    'ls:List directory contents'
-                    'clear:Clear conversation history'
+                    'clean:Clear conversation history'
                     'model:Switch LLM model'
                     'fix:Get coding assistance'
                     'tldr:Show quick command examples'

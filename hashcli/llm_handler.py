@@ -57,12 +57,14 @@ class LLMHandler:
             ConversationHistory(config.history_dir) if config.history_enabled else None
         )
         self.current_session_id = None
+        self.last_tool_calls_executed = False
 
     async def chat(
         self, message: str, stream_handler: Optional[Callable[[str], None]] = None
     ) -> str:
         """Main chat interface that handles the complete conversation flow."""
         try:
+            self.last_tool_calls_executed = False
             # Start new session if needed
             if self.history and not self.current_session_id:
                 self.current_session_id = self.history.start_session()
@@ -83,6 +85,7 @@ class LLMHandler:
 
             # Handle tool calls if present
             if response.has_tool_calls():
+                self.last_tool_calls_executed = True
                 response = await self._handle_tool_calls(
                     response, context_messages, stream_handler
                 )
@@ -157,6 +160,7 @@ Tool usage policy:
 - If the answer depends on the current system state, date/time, or filesystem, call a tool.
 - For time/date questions (e.g., "what day is today", "current time"), use the execute_shell_command tool (e.g., `date` or `date +%A`) and answer using its output.
 - If a user asks something that can be checked locally (e.g., current directory, username, OS info, available files), use the appropriate tool instead of guessing.
+- If the user asks how to perform a shell task and a safe, direct command is appropriate, include the command in your answer and append a final line exactly: "do you want execute `<command>`?" (use backticks around the command). Do not execute the command unless the user explicitly confirms.
 
 You have access to tools that can interact with the system. Use them appropriately to assist the user effectively."""
 
@@ -268,66 +272,78 @@ You have access to tools that can interact with the system. Use them appropriate
         """Handle tool calls from the LLM response."""
         from .tools import get_tool_executor
 
-        tool_results = []
+        messages_with_tools = list(context_messages)
+        current_response = response
+        max_tool_rounds = 3
 
-        for tool_call in response.tool_calls:
-            # Get user confirmation if required
-            if self.config.require_confirmation:
-                if not self._get_user_confirmation(tool_call):
+        for _ in range(max_tool_rounds):
+            if not current_response.has_tool_calls():
+                return current_response
+
+            tool_results = []
+            for tool_call in current_response.tool_calls:
+                executor = get_tool_executor(tool_call.name)
+                if executor is None:
                     tool_results.append({
                         "tool_call_id": tool_call.call_id,
-                        "output": "User declined to execute this tool call.",
+                        "output": f"Unknown tool: {tool_call.name}",
                     })
                     continue
 
-            # Execute tool call
-            try:
-                executor = get_tool_executor(tool_call.name)
-                result = await executor.execute(tool_call.arguments, self.config)
+                # Get user confirmation if required
+                if self.config.require_confirmation and executor.requires_confirmation():
+                    if not self._get_user_confirmation(tool_call):
+                        tool_results.append({
+                            "tool_call_id": tool_call.call_id,
+                            "output": "User declined to execute this tool call.",
+                        })
+                        continue
 
-                tool_results.append(
-                    {"tool_call_id": tool_call.call_id, "output": str(result)}
-                )
+                # Execute tool call
+                try:
+                    result = await executor.execute(tool_call.arguments, self.config)
+                    tool_results.append(
+                        {"tool_call_id": tool_call.call_id, "output": str(result)}
+                    )
+                except Exception as e:
+                    tool_results.append({
+                        "tool_call_id": tool_call.call_id,
+                        "output": f"Error executing tool: {e}",
+                    })
 
-            except Exception as e:
-                tool_results.append({
-                    "tool_call_id": tool_call.call_id,
-                    "output": f"Error executing tool: {e}",
-                })
-
-        # Get follow-up response from LLM with tool results
-        tool_call_messages = [{
-            "role": "assistant",
-            "content": response.content,
-            "tool_calls": [
+            # Get follow-up response from LLM with tool results
+            tool_call_messages = [{
+                "role": "assistant",
+                "content": current_response.content,
+                "tool_calls": [
+                    {
+                        "id": tc.call_id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments),
+                        },
+                    }
+                    for tc in current_response.tool_calls
+                ],
+            }]
+            tool_result_messages = [
                 {
-                    "id": tc.call_id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.name,
-                        "arguments": json.dumps(tc.arguments),
-                    },
+                    "role": "tool",
+                    "content": result["output"],
+                    "tool_call_id": result["tool_call_id"],
                 }
-                for tc in response.tool_calls
-            ],
-        }]
-        tool_result_messages = [
-            {
-                "role": "tool",
-                "content": result["output"],
-                "tool_call_id": result["tool_call_id"],
-            }
-            for result in tool_results
-        ]
-        messages_with_tools = (
-            context_messages + tool_call_messages + tool_result_messages
-        )
+                for result in tool_results
+            ]
+            messages_with_tools.extend(tool_call_messages + tool_result_messages)
 
-        follow_up_response = await self.provider.generate_response(
-            messages_with_tools,
-            stream_handler=stream_handler if self.config.streaming else None,
-        )
-        return follow_up_response
+            current_response = await self.provider.generate_response(
+                messages_with_tools,
+                tools=self._get_available_tools(),
+                stream_handler=stream_handler if self.config.streaming else None,
+            )
+
+        return current_response
 
     def _get_user_confirmation(self, tool_call: ToolCall) -> bool:
         """Get user confirmation for a tool call."""

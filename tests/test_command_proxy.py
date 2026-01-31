@@ -1,10 +1,8 @@
 """Unit tests for command proxy system."""
 
-import pytest
 from unittest.mock import patch, MagicMock
 
-from hashcli.command_proxy import CommandProxy, Command
-from hashcli.commands.ls import LSCommand
+from hashcli.command_proxy import CommandProxy
 from hashcli.commands.clear import ClearCommand
 from hashcli.commands.help import HelpCommand
 from hashcli.commands.tldr import TLDRCommand
@@ -20,9 +18,7 @@ class TestCommandProxy:
         available_commands = proxy.get_available_commands()
 
         expected_commands = [
-            "ls",
-            "dir",
-            "clear",
+            "clean",
             "model",
             "fix",
             "tldr",
@@ -48,12 +44,12 @@ class TestCommandProxy:
         """Test command with arguments."""
         proxy = CommandProxy(sample_config)
 
-        # Mock the ls command
+        # Mock the clean command
         with patch.object(
-            proxy.commands["ls"], "execute", return_value="Directory listing"
+            proxy.commands["clean"], "execute", return_value="History cleaned"
         ):
-            result = proxy.execute("/ls -la /home")
-            assert "Directory listing" in result
+            result = proxy.execute("/clean --days 7")
+            assert "History cleaned" in result
 
     def test_unknown_command(self, sample_config):
         """Test handling of unknown commands."""
@@ -94,23 +90,6 @@ class TestCommandProxy:
         assert unknown_help is None
 
 
-class TestLSCommand:
-    """Test the LS command."""
-
-    def test_ls_command_basic(self, sample_config):
-        """Test basic ls command execution."""
-        ls_cmd = LSCommand()
-
-        # Mock subprocess.run
-        with patch("hashcli.command_proxy.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                stdout="file1.txt\\nfile2.py\\n", stderr="", returncode=0
-            )
-
-            result = ls_cmd.execute([], sample_config)
-            assert mock_run.called
-
-
 class TestTLDRCommand:
     """Test the TLDR command."""
 
@@ -129,39 +108,6 @@ class TestTLDRCommand:
 
             assert "tar -cf archive.tar" in result
             assert mock_run.called
-
-    def test_ls_command_with_args(self, sample_config):
-        """Test ls command with arguments."""
-        ls_cmd = LSCommand()
-
-        with patch("hashcli.command_proxy.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                stdout="total 8\\n-rw-r--r-- 1 user user 100 Jan 1 12:00 file.txt\\n",
-                stderr="",
-                returncode=0,
-            )
-
-            result = ls_cmd.execute(["-l"], sample_config)
-            assert mock_run.called
-
-    def test_ls_command_error_handling(self, sample_config):
-        """Test ls command error handling."""
-        ls_cmd = LSCommand()
-
-        with patch("hashcli.command_proxy.subprocess.run") as mock_run:
-            mock_run.side_effect = FileNotFoundError("Command not found")
-
-            result = ls_cmd.execute([], sample_config)
-            assert "Command not found" in result
-
-    def test_ls_help(self):
-        """Test ls command help."""
-        ls_cmd = LSCommand()
-        help_text = ls_cmd.get_help()
-
-        assert "List directory contents" in help_text
-        assert "examples" in help_text.lower() or "example" in help_text.lower()
-
 
 class TestClearCommand:
     """Test the Clear command."""
@@ -214,7 +160,7 @@ class TestClearCommand:
         clear_cmd = ClearCommand()
         help_text = clear_cmd.get_help()
 
-        assert "Clear conversation history" in help_text
+        assert "Clean conversation history" in help_text
         assert "--all" in help_text
         assert "--days" in help_text
 
@@ -229,15 +175,15 @@ class TestHelpCommand:
 
         assert "Hash CLI" in result
         assert "DUAL MODE OPERATION" in result
-        assert "/ls" in result
+        assert "/clean" in result
         assert "/help" in result
 
     def test_help_specific_command(self, sample_config):
         """Test help for specific command."""
         help_cmd = HelpCommand()
-        result = help_cmd.execute(["ls"], sample_config)
+        result = help_cmd.execute(["clean"], sample_config)
 
-        assert "Help for /ls" in result
+        assert "Help for /clean" in result
 
     def test_help_unknown_command(self, sample_config):
         """Test help for unknown command."""

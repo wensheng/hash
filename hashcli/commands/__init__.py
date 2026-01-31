@@ -4,12 +4,10 @@ from .clear import ClearCommand
 from .config import ConfigCommand
 from .fix import FixCommand
 from .help import HelpCommand
-from .ls import LSCommand
 from .model import ModelCommand
 from .tldr import TLDRCommand
 
 __all__ = [
-    "LSCommand",
     "ClearCommand",
     "ModelCommand",
     "FixCommand",

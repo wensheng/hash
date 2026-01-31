@@ -20,11 +20,11 @@ class TestMainEntryPoint:
             mock_proxy.execute.return_value = "Command executed successfully"
             mock_proxy_class.return_value = mock_proxy
 
-            execute_command_mode("/ls -la", sample_config, quiet=True)
+            execute_command_mode("/clean --days 7", sample_config, quiet=True)
 
             # Verify CommandProxy was called
             mock_proxy_class.assert_called_once_with(sample_config)
-            mock_proxy.execute.assert_called_once_with("/ls -la")
+            mock_proxy.execute.assert_called_once_with("/clean --days 7")
 
     @pytest.mark.asyncio
     async def test_llm_mode_detection(self, sample_config):
@@ -154,8 +154,8 @@ class TestLLMIntegration:
 class TestCommandIntegration:
     """Test command integration and cross-platform compatibility."""
 
-    def test_ls_command_integration(self, sample_config):
-        """Test ls command integration."""
+    def test_system_command_integration(self, sample_config):
+        """Test system command integration."""
         proxy = CommandProxy(sample_config)
 
         # Mock subprocess for cross-platform testing
@@ -179,8 +179,7 @@ class TestCommandIntegration:
 
         assert "Hash CLI" in result
         assert "DUAL MODE OPERATION" in result
-        assert "/ls" in result
-        assert "/clear" in result
+        assert "/clean" in result
         assert "/help" in result
 
     def test_model_command_integration(self, sample_config):

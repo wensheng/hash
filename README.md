@@ -38,9 +38,11 @@ replace `#` with `hashcli`  if you do no want to set up shell integration.
 ```bash
 #/ls -la
 #/model gpt-4
-#/clear
+#/clean
 #/fix "implement authentication"
 ```
+
+Slash commands check for system commands first (e.g., `/ls`, `/grep`, `/find`) and execute them directly when available.
 
 ## Shell Integration
 

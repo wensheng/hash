@@ -34,16 +34,8 @@ function Complete-HashProxyCommand {
     $proxyCmd = ($Command -replace '^\s*/([^\s]+).*', '$1').Trim()
 
     switch ($proxyCmd) {
-        'ls' {
-            # File and directory completions
-            Get-ChildItem -Path . -Name "*$WordToComplete*" | ForEach-Object {
-                [System.Management.Automation.CompletionResult]::new(
-                    $_,
-                    $_,
-                    [System.Management.Automation.CompletionResultType]::ParameterValue,
-                    $_
-                )
-            }
+        'clean' {
+            # No additional completions for clean
         }
 
         'model' {

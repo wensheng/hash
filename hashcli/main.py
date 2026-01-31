@@ -12,7 +12,9 @@ if __name__ == "__main__" and __package__ is None:
 
 import asyncio
 import os
+import re
 import subprocess
+from typing import Optional
 from pathlib import Path
 from typing import List, Optional
 
@@ -20,6 +22,7 @@ import typer
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.prompt import Confirm
 from rich.text import Text
 
 from hashcli.command_proxy import CommandProxy
@@ -45,6 +48,111 @@ app = typer.Typer(
 console = Console()
 
 
+def _extract_suggested_command(response_text: str) -> Optional[str]:
+    if not response_text:
+        return None
+
+    def clean_command(command: str) -> str:
+        cleaned = command.strip().rstrip("?.! ")
+        if (
+            len(cleaned) >= 2
+            and cleaned[0] == cleaned[-1]
+            and cleaned[0] in "\"'`"
+        ):
+            cleaned = cleaned[1:-1].strip()
+        return cleaned
+
+    question_pattern = re.compile(
+        r"(do you want|would you like|should i)\s+(?:to\s+|me\s+to\s+)?(?:execute|run)\b",
+        re.IGNORECASE,
+    )
+
+    lines = response_text.splitlines()
+    for i, line in enumerate(lines):
+        if question_pattern.search(line):
+            inline_cmd = re.search(r"`([^`]+)`", line)
+            if inline_cmd:
+                return clean_command(inline_cmd.group(1))
+
+            tail_cmd = re.search(r"(?:execute|run)\s+(.+)", line, re.IGNORECASE)
+            if tail_cmd:
+                candidate = clean_command(tail_cmd.group(1))
+                if candidate and "command" not in candidate.lower():
+                    return candidate
+
+            if i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                next_inline = re.search(r"`([^`]+)`", next_line)
+                if next_inline:
+                    return clean_command(next_inline.group(1))
+
+                if next_line.startswith("```"):
+                    fence_content = next_line.strip("`").strip()
+                    if fence_content:
+                        return clean_command(fence_content)
+                    for j in range(i + 2, len(lines)):
+                        block_line = lines[j].strip()
+                        if block_line.startswith("```"):
+                            break
+                        if block_line:
+                            return clean_command(block_line)
+                if next_line.startswith("$"):
+                    return clean_command(next_line.lstrip("$").strip())
+
+            # Fall back to the last command-like snippet in the response.
+            fence_match = re.search(
+                r"```[a-zA-Z0-9_-]*\n([^`]+?)\n```", response_text, re.DOTALL
+            )
+            if fence_match:
+                for block_line in fence_match.group(1).splitlines():
+                    if block_line.strip():
+                        return clean_command(block_line)
+
+            inline_commands = re.findall(r"`([^`]+)`", response_text)
+            if inline_commands:
+                return clean_command(inline_commands[-1])
+
+    if re.search(r"\b(execute|run|command|use|try)\b", response_text, re.IGNORECASE):
+        fence_match = re.search(
+            r"```[a-zA-Z0-9_-]*\n([^`]+?)\n```", response_text, re.DOTALL
+        )
+        if fence_match:
+            for line in fence_match.group(1).splitlines():
+                if line.strip():
+                    return clean_command(line)
+
+        inline_commands = re.findall(r"`([^`]+)`", response_text)
+        if inline_commands:
+            return clean_command(inline_commands[-1])
+
+    return None
+
+
+async def _maybe_execute_suggested_command(
+    response_text: str, config, quiet: bool = False
+) -> None:
+    suggested_command = _extract_suggested_command(response_text)
+    if not suggested_command:
+        return
+
+    question = f"do you want execute `{suggested_command}`?"
+    if not Confirm.ask(question, default=False):
+        return
+
+    from hashcli.tools.shell import ShellTool
+
+    tool = ShellTool()
+    result = await tool.execute(
+        {
+            "command": suggested_command,
+            "description": "User-confirmed command execution",
+        },
+        config,
+    )
+    if result:
+        display_result(result, config, quiet)
+
+
 def show_welcome():
     """Display welcome message with usage instructions."""
     welcome_text = """
@@ -61,9 +169,8 @@ hashcli help me debug this python script
 
 **Command Proxy Mode** (Direct commands with `/` prefix):
 ```bash
-hashcli /ls -la
 hashcli /model gpt-5-mini
-hashcli /clear
+hashcli /clean
 hashcli /fix "implement authentication"
 ```
 
@@ -398,19 +505,25 @@ async def execute_llm_mode(input_text: str, config, quiet: bool = False):
     handler = LLMHandler(config)
 
     if config.streaming:
-        streamed_output = {"emitted": False}
+        streamed_output = {"emitted": False, "buffer": []}
 
         def stream_handler(chunk: str) -> None:
             if not chunk:
                 return
             streamed_output["emitted"] = True
+            streamed_output["buffer"].append(chunk)
             console.print(chunk, end="", markup=False)
 
         result = await handler.chat(input_text, stream_handler=stream_handler)
+        final_text = result
         if streamed_output["emitted"]:
             console.print()
+            if not final_text:
+                final_text = "".join(streamed_output["buffer"])
         elif result:
             display_result(result, config, quiet)
+        if final_text and not handler.last_tool_calls_executed:
+            await _maybe_execute_suggested_command(final_text, config, quiet)
         return
 
     if not quiet:
@@ -423,6 +536,8 @@ async def execute_llm_mode(input_text: str, config, quiet: bool = False):
 
     if result:
         display_result(result, config, quiet)
+        if not handler.last_tool_calls_executed:
+            await _maybe_execute_suggested_command(result, config, quiet)
 
 
 def display_result(result: str, config, quiet: bool = False):

@@ -1,4 +1,4 @@
-"""Clear command implementation for clearing conversation history."""
+"""Clean command implementation for clearing conversation history."""
 
 from typing import List
 
@@ -7,10 +7,10 @@ from ..config import HashConfig
 
 
 class ClearCommand(Command):
-    """Command to clear conversation history."""
+    """Command to clean conversation history."""
 
     def execute(self, args: List[str], config: HashConfig) -> str:
-        """Clear conversation history."""
+        """Clean conversation history."""
         from ..history import ConversationHistory
 
         if not config.history_enabled:
@@ -61,13 +61,13 @@ class ClearCommand(Command):
                 return f"Error clearing history: {e}"
 
     def get_help(self) -> str:
-        """Get help text for the clear command."""
-        return """Clear conversation history:
-  /clear                    - Clear conversations older than 30 days
-  /clear --days N          - Clear conversations older than N days
-  /clear --all             - Clear ALL conversation history
+        """Get help text for the clean command."""
+        return """Clean conversation history:
+  /clean                    - Clear conversations older than 30 days
+  /clean --days N          - Clear conversations older than N days
+  /clean --all             - Clear ALL conversation history
   
 Examples:
-  /clear                   - Clear old conversations
-  /clear --days 7          - Clear conversations older than 7 days
-  /clear --all             - Clear everything (cannot be undone)"""
+  /clean                   - Clear old conversations
+  /clean --days 7          - Clear conversations older than 7 days
+  /clean --all             - Clear everything (cannot be undone)"""

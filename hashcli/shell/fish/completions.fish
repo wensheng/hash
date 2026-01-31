@@ -13,9 +13,8 @@ function __hash_complete_command
         set -l proxy_cmd (string replace -r '^/([^[:space:]]+).*' '$1' "$buffer_content")
 
         switch "$proxy_cmd"
-            case ls
-                # File completions for ls
-                __fish_complete_path
+            case clean
+                # No additional completions for clean
             case model
                 # Available models
                 echo -e "gpt-4\tOpenAI GPT-4"

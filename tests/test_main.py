@@ -81,8 +81,8 @@ def test_command_mode_execution(mocker):
     mock_instance.execute.return_value = "command output"
 
     config = HashConfig()
-    execute_command_mode("/ls", config)
-    mock_instance.execute.assert_called_with("/ls")
+    execute_command_mode("/clean", config)
+    mock_instance.execute.assert_called_with("/clean")
 
 
 @pytest.mark.asyncio

@@ -148,6 +148,35 @@ class OpenAIProvider(LLMProvider):
         """Convert OpenAI chat-format messages to Responses API input items."""
         input_items: List[Dict[str, Any]] = []
 
+        assistant_msg_index = 0
+
+        def make_message_item(role: str, content: Any) -> Dict[str, Any]:
+            """Build a typed message item for the Responses API."""
+            nonlocal assistant_msg_index
+            if not isinstance(content, (str, list)):
+                content = str(content)
+
+            if role == "assistant":
+                assistant_msg_index += 1
+                if isinstance(content, list):
+                    content_parts = content
+                else:
+                    content_parts = [{"type": "output_text", "text": content}]
+                return {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": content_parts,
+                    "status": "completed",
+                    "id": f"assistant_msg_{assistant_msg_index}",
+                }
+
+            if isinstance(content, list):
+                content_parts = content
+            else:
+                content_parts = [{"type": "input_text", "text": content}]
+
+            return {"type": "message", "role": role, "content": content_parts}
+
         for message in messages:
             role = message.get("role")
             content = message.get("content", "")
@@ -155,7 +184,7 @@ class OpenAIProvider(LLMProvider):
             # Map standard roles to easy input messages.
             if role in ("system", "user", "assistant", "developer"):
                 if content:
-                    input_items.append({"role": role, "content": content})
+                    input_items.append(make_message_item(role, content))
 
             # Map assistant tool calls to function_call items.
             tool_calls = message.get("tool_calls") or []
@@ -188,7 +217,7 @@ class OpenAIProvider(LLMProvider):
                 elif content:
                     # Fallback to preserve tool output if call_id is missing.
                     input_items.append(
-                        {"role": "user", "content": f"Tool result: {content}"}
+                        make_message_item("user", f"Tool result: {content}")
                     )
 
         return input_items

@@ -65,8 +65,8 @@ _hash_command_proxy_mode() {
             local config_options="show set get list reset"
             COMPREPLY=( $(compgen -W "$config_options" -- "$cur") )
             ;;
-        clear)
-            # No additional completions for clear
+        clean)
+            # No additional completions for clean
             COMPREPLY=()
             ;;
         help)
@@ -76,7 +76,7 @@ _hash_command_proxy_mode() {
             ;;
         "")
             # List available slash commands
-            local slash_commands="ls clear model fix help config tldr"
+            local slash_commands="clean model fix help config tldr"
             COMPREPLY=( $(compgen -W "$slash_commands" -P "/" -- "${cur#/}") )
             ;;
         *)

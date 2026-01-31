@@ -28,8 +28,7 @@ DUAL MODE OPERATION:
   hashcli /<command>          - Command proxy mode for direct actions
 
 AVAILABLE COMMANDS:
-  /ls [args]                  - List directory contents (cross-platform)
-  /clear [options]            - Clear conversation history  
+  /clean [options]            - Clear conversation history  
   /model [options]            - Switch LLM models and providers
   /fix <description>          - Get coding assistance
   /tldr <command>             - Show quick command examples
@@ -45,9 +44,8 @@ EXAMPLES:
   hashcli help me optimize this Python script
   
   # Command Mode:
-  hashcli /ls -la
   hashcli /model set gpt-5-mini
-  hashcli /clear --days 7
+  hashcli /clean --days 7
   hashcli /fix my tests are failing
   hashcli /tldr tar
 
@@ -91,4 +89,4 @@ For command-specific help: /help <command>"""
 Examples:
   /help                    - Show this help
   /help model              - Show help for model command
-  /help ls                 - Show help for ls command"""
+  /help clean              - Show help for clean command"""
