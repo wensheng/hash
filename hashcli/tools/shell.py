@@ -56,16 +56,16 @@ class ShellTool(Tool):
             # Format output
             output = ""
             if result.stdout:
-                output += f"stdout:\\n{result.stdout}"
+                output += result.stdout
 
             if result.stderr:
                 if output:
-                    output += "\\n\\n"
-                output += f"stderr:\\n{result.stderr}"
+                    output += "\n\n"
+                output += f"stderr:\n{result.stderr}"
 
             if result.returncode != 0:
                 if output:
-                    output += "\\n\\n"
+                    output += "\n\n"
                 output += f"Exit code: {result.returncode}"
 
             if not output:
