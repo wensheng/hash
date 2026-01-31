@@ -51,4 +51,3 @@ class TLDRCommand(Command):
 Examples:
   /tldr tar
   /tldr --search docker"""
-

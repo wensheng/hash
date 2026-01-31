@@ -1,6 +1,5 @@
 """Anthropic provider implementation for Hash CLI."""
 
-import json
 from typing import Any, Callable, Dict, List, Optional
 
 import anthropic
@@ -67,11 +66,7 @@ class AnthropicProvider(LLMProvider):
                 if block.type == "text":
                     content += block.text
                 elif block.type == "tool_use":
-                    tool_calls.append(
-                        ToolCall(
-                            name=block.name, arguments=block.input, call_id=block.id
-                        )
-                    )
+                    tool_calls.append(ToolCall(name=block.name, arguments=block.input, call_id=block.id))
             if not content and streamed_content:
                 content = "".join(streamed_content)
 
@@ -80,32 +75,26 @@ class AnthropicProvider(LLMProvider):
                 {
                     "input_tokens": response.usage.input_tokens,
                     "output_tokens": response.usage.output_tokens,
-                    "total_tokens": (
-                        response.usage.input_tokens + response.usage.output_tokens
-                    ),
+                    "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
                 }
                 if response.usage
                 else None
             )
 
-            return LLMResponse(
-                content=content, tool_calls=tool_calls, model=self.model, usage=usage
-            )
+            return LLMResponse(content=content, tool_calls=tool_calls, model=self.model, usage=usage)
 
-        except anthropic.RateLimitError as e:
+        except anthropic.RateLimitError:
             return LLMResponse(
                 content="Rate limit exceeded. Please try again in a moment.",
                 model=self.model,
             )
-        except anthropic.AuthenticationError as e:
+        except anthropic.AuthenticationError:
             return LLMResponse(
                 content="Authentication failed. Please check your Anthropic API key.",
                 model=self.model,
             )
         except anthropic.APIError as e:
-            return LLMResponse(
-                content=f"Anthropic API error: {str(e)}", model=self.model
-            )
+            return LLMResponse(content=f"Anthropic API error: {str(e)}", model=self.model)
         except Exception as e:
             return LLMResponse(content=f"Unexpected error: {str(e)}", model=self.model)
 
@@ -121,9 +110,7 @@ class AnthropicProvider(LLMProvider):
             and self.model is not None
         )
 
-    def _format_messages_for_provider(
-        self, messages: List[Dict[str, str]]
-    ) -> Dict[str, Any]:
+    def _format_messages_for_provider(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         """Convert OpenAI format messages to Anthropic format."""
         system_message = None
         anthropic_messages = []
@@ -138,15 +125,11 @@ class AnthropicProvider(LLMProvider):
                 anthropic_messages.append({"role": role, "content": content})
             elif role == "tool":
                 # Convert tool result to user message for Anthropic
-                anthropic_messages.append(
-                    {"role": "user", "content": f"Tool result: {content}"}
-                )
+                anthropic_messages.append({"role": "user", "content": f"Tool result: {content}"})
 
         return {"system": system_message, "messages": anthropic_messages}
 
-    def _format_tools_for_provider(
-        self, tools: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+    def _format_tools_for_provider(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Convert OpenAI format tools to Anthropic format."""
         anthropic_tools = []
 

@@ -1,9 +1,8 @@
 """Code analysis tool for LLM."""
 
 import ast
-import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from ..config import HashConfig
 from .base import Tool
@@ -146,12 +145,8 @@ class CodeAnalysisTool(Tool):
         # Estimate lines (rough)
         try:
             with open(path, "r") as f:
-                metrics["lines"] = len([
-                    line
-                    for line in f
-                    if line.strip() and not line.strip().startswith("#")
-                ])
-        except:
+                metrics["lines"] = len([line for line in f if line.strip() and not line.strip().startswith("#")])
+        except Exception:
             pass
 
         result = f"Python complexity analysis for {path.name}:\\n\\n"
@@ -164,10 +159,7 @@ class CodeAnalysisTool(Tool):
 
         # Basic complexity assessment
         complexity_score = (
-            metrics["functions"] * 2
-            + metrics["classes"] * 3
-            + metrics["loops"] * 2
-            + metrics["conditions"] * 1.5
+            metrics["functions"] * 2 + metrics["classes"] * 3 + metrics["loops"] * 2 + metrics["conditions"] * 1.5
         )
 
         if complexity_score < 20:
@@ -177,9 +169,7 @@ class CodeAnalysisTool(Tool):
         else:
             assessment = "High complexity"
 
-        result += (
-            f"\\nComplexity assessment: {assessment} (score: {complexity_score:.1f})"
-        )
+        result += f"\\nComplexity assessment: {assessment} (score: {complexity_score:.1f})"
 
         return result
 
@@ -211,9 +201,7 @@ class CodeAnalysisTool(Tool):
                 for alias in node.names:
                     name = alias.asname or alias.name
                     if content.count(name) <= 1:  # Only appears in import
-                        issues.append(
-                            f"Line {node.lineno}: Potentially unused import '{name}'"
-                        )
+                        issues.append(f"Line {node.lineno}: Potentially unused import '{name}'")
 
         result = f"Python code issues for {path.name}:\\n\\n"
 
@@ -244,16 +232,12 @@ class CodeAnalysisTool(Tool):
             lines = content.split("\\n")
 
             # Basic metrics
-            functions = len(
-                [line for line in lines if "function" in line or "=>" in line]
-            )
+            functions = len([line for line in lines if "function" in line or "=>" in line])
             classes = len([line for line in lines if line.strip().startswith("class ")])
             imports = len([
                 line
                 for line in lines
-                if line.strip().startswith("import ")
-                or line.strip().startswith("const ")
-                and "require(" in line
+                if line.strip().startswith("import ") or line.strip().startswith("const ") and "require(" in line
             ])
 
             result = f"JavaScript analysis for {path.name}:\\n\\n"
@@ -276,19 +260,11 @@ class CodeAnalysisTool(Tool):
             lines = content.split("\\n")
 
             # Basic metrics
-            classes = len(
-                [line for line in lines if "class " in line and "public" in line]
+            classes = len([line for line in lines if "class " in line and "public" in line])
+            methods = len(
+                [line for line in lines if ("public " in line or "private " in line) and "(" in line and ")" in line]
             )
-            methods = len([
-                line
-                for line in lines
-                if ("public " in line or "private " in line)
-                and "(" in line
-                and ")" in line
-            ])
-            imports = len(
-                [line for line in lines if line.strip().startswith("import ")]
-            )
+            imports = len([line for line in lines if line.strip().startswith("import ")])
 
             result = f"Java analysis for {path.name}:\\n\\n"
             result += f"Total lines: {len(lines)}\\n"
@@ -313,13 +289,11 @@ class CodeAnalysisTool(Tool):
             result += f"File type: {path.suffix}\\n"
             result += f"File size: {len(content)} characters\\n"
             result += f"Total lines: {len(lines)}\\n"
-            result += (
-                f"Non-empty lines: {len([line for line in lines if line.strip()])}\\n"
-            )
+            result += f"Non-empty lines: {len([line for line in lines if line.strip()])}\\n"
 
             # Show first few lines as preview
             preview_lines = lines[:10]
-            result += f"\\nPreview (first 10 lines):\\n"
+            result += "\\nPreview (first 10 lines):\\n"
             for i, line in enumerate(preview_lines, 1):
                 result += f"{i:2d}: {line[:80]}{'...' if len(line) > 80 else ''}\\n"
 

@@ -28,8 +28,46 @@ class OpenAIProvider(LLMProvider):
         """Generate response using OpenAI API."""
 
         try:
+
+            def get_field(obj: Any, name: str, default: Any = None) -> Any:
+                if isinstance(obj, dict):
+                    return obj.get(name, default)
+                return getattr(obj, name, default)
+
+            def extract_text_from_content(content_item: Any) -> Optional[str]:
+                content_type = get_field(content_item, "type")
+                if content_type in ("output_text", "input_text", "text"):
+                    text = get_field(content_item, "text")
+                    if text:
+                        return text
+                if content_type == "refusal":
+                    refusal = get_field(content_item, "refusal")
+                    if refusal:
+                        return refusal
+                text = get_field(content_item, "text")
+                if text:
+                    return text
+                content = get_field(content_item, "content")
+                if content:
+                    return content
+                return None
+
+            # Extract system/developer instructions and convert remaining messages.
+            instruction_parts: List[str] = []
+            input_messages: List[Dict[str, Any]] = []
+            for message in messages:
+                role = message.get("role")
+                if role in ("system", "developer"):
+                    content = message.get("content", "")
+                    if content:
+                        instruction_parts.append(str(content))
+                else:
+                    input_messages.append(message)
+
             # Convert chat-style messages (with tool_calls/tool results) to Responses input items.
-            input_items = self._format_messages_for_responses(messages)
+            # If we somehow lost all input messages, fall back to the full message list.
+            input_items = self._format_messages_for_responses(input_messages or messages)
+            instructions = "\n\n".join(instruction_parts) if instruction_parts else None
 
             # Convert tools to Responses API shape if needed
             response_tools = None
@@ -38,28 +76,36 @@ class OpenAIProvider(LLMProvider):
                 for tool in tools:
                     if tool.get("type") == "function" and "function" in tool:
                         function_spec = tool["function"]
-                        response_tools.append(
-                            {
-                                "type": "function",
-                                "name": function_spec.get("name"),
-                                "description": function_spec.get("description"),
-                                "parameters": function_spec.get("parameters"),
-                            }
-                        )
+                        response_tools.append({
+                            "type": "function",
+                            "name": function_spec.get("name"),
+                            "description": function_spec.get("description"),
+                            "parameters": function_spec.get("parameters"),
+                            "strict": True,
+                        })
                     else:
                         response_tools.append(tool)
 
             # Prepare request parameters
+            text_config: Dict[str, Any] = {"format": {"type": "text"}}
+            if self.config.openai_text_verbosity:
+                text_config["verbosity"] = self.config.openai_text_verbosity
+
             request_params = {
                 "model": self.model,
                 "input": input_items,
                 "max_output_tokens": self.config.max_response_tokens,
+                "text": text_config,
             }
 
             # Add tools if provided
             if response_tools:
                 request_params["tools"] = response_tools
                 request_params["tool_choice"] = "auto"
+            if instructions:
+                request_params["instructions"] = instructions
+            if self.config.openai_reasoning_effort:
+                request_params["reasoning"] = {"effort": self.config.openai_reasoning_effort}
 
             # Make API call
             streamed_content: List[str] = []
@@ -79,38 +125,103 @@ class OpenAIProvider(LLMProvider):
             else:
                 response = await self.client.responses.create(**request_params)
 
+            response_error = get_field(response, "error")
+            if response_error:
+                error_code = get_field(response_error, "code", "unknown_error")
+                error_message = get_field(response_error, "message", str(response_error))
+                return LLMResponse(
+                    content=f"OpenAI response error ({error_code}): {error_message}",
+                    model=self.model,
+                )
+
             # Extract response content
             content_parts: List[str] = []
 
             # Extract tool calls if present
             tool_calls = []
-            for output in response.output or []:
-                output_type = getattr(output, "type", None)
+            reasoning_summaries: List[str] = []
+            for output in get_field(response, "output", []) or []:
+                output_type = get_field(output, "type")
                 if output_type == "message":
-                    for content in output.content:
-                        if content.type == "output_text":
-                            content_parts.append(content.text)
-                        elif content.type == "refusal":
-                            content_parts.append(content.refusal)
+                    message_content = get_field(output, "content", [])
+                    if isinstance(message_content, str):
+                        if message_content:
+                            content_parts.append(message_content)
+                    else:
+                        for content in message_content or []:
+                            text = extract_text_from_content(content)
+                            if text:
+                                content_parts.append(text)
+                elif output_type in ("output_text", "text"):
+                    text = get_field(output, "text", "")
+                    if text:
+                        content_parts.append(text)
                 elif output_type == "function_call":
                     try:
-                        arguments = json.loads(output.arguments)
+                        raw_arguments = get_field(output, "arguments")
+                        name = get_field(output, "name")
+                        if name is None or raw_arguments is None:
+                            continue
+                        arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
                         tool_calls.append(
                             ToolCall(
-                                name=output.name,
+                                name=name,
                                 arguments=arguments,
-                                call_id=output.call_id,
+                                call_id=(get_field(output, "call_id") or get_field(output, "id")),
                             )
                         )
                     except json.JSONDecodeError:
                         content_parts.append(
-                            "\\n\\nNote: Malformed tool call arguments:"
-                            f" {output.arguments}"
+                            f"\\n\\nNote: Malformed tool call arguments: {get_field(output, 'arguments')}"
                         )
+                elif output_type == "custom_tool_call":
+                    raw_input = get_field(output, "input")
+                    name = get_field(output, "name")
+                    if name is None or raw_input is None:
+                        continue
+                    arguments: Any = raw_input
+                    if isinstance(raw_input, str):
+                        try:
+                            arguments = json.loads(raw_input)
+                        except json.JSONDecodeError:
+                            arguments = {"input": raw_input}
+                    tool_calls.append(
+                        ToolCall(
+                            name=name,
+                            arguments=arguments,
+                            call_id=(get_field(output, "call_id") or get_field(output, "id")),
+                        )
+                    )
+                elif output_type == "reasoning":
+                    summaries = get_field(output, "summary", []) or []
+                    for summary in summaries:
+                        summary_text = get_field(summary, "text")
+                        if summary_text:
+                            reasoning_summaries.append(str(summary_text))
 
             content = "".join(content_parts)
             if not content and streamed_content:
                 content = "".join(streamed_content)
+            if not content:
+                fallback_text = get_field(response, "output_text")
+                if callable(fallback_text):
+                    try:
+                        fallback_text = fallback_text()
+                    except TypeError:
+                        pass
+                if fallback_text:
+                    content = str(fallback_text)
+            if not content and not tool_calls and reasoning_summaries:
+                content = "Reasoning summary (no final text output): " + " ".join(reasoning_summaries)
+            if not content and not tool_calls:
+                status = get_field(response, "status")
+                incomplete = get_field(response, "incomplete_details")
+                detail = ""
+                if status and status != "completed":
+                    detail = f" (status: {status})"
+                if incomplete:
+                    detail = f"{detail} (incomplete: {incomplete})"
+                content = f"No response generated by OpenAI.{detail} Try another model or run with --debug for details."
 
             # Extract usage information
             usage = (
@@ -123,16 +234,14 @@ class OpenAIProvider(LLMProvider):
                 else None
             )
 
-            return LLMResponse(
-                content=content, tool_calls=tool_calls, model=self.model, usage=usage
-            )
+            return LLMResponse(content=content, tool_calls=tool_calls, model=self.model, usage=usage)
 
-        except openai.RateLimitError as e:
+        except openai.RateLimitError:
             return LLMResponse(
                 content="Rate limit exceeded. Please try again in a moment.",
                 model=self.model,
             )
-        except openai.AuthenticationError as e:
+        except openai.AuthenticationError:
             return LLMResponse(
                 content="Authentication failed. Please check your OpenAI API key.",
                 model=self.model,
@@ -142,9 +251,7 @@ class OpenAIProvider(LLMProvider):
         except Exception as e:
             return LLMResponse(content=f"Unexpected error: {str(e)}", model=self.model)
 
-    def _format_messages_for_responses(
-        self, messages: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+    def _format_messages_for_responses(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Convert OpenAI chat-format messages to Responses API input items."""
         input_items: List[Dict[str, Any]] = []
 
@@ -194,31 +301,25 @@ class OpenAIProvider(LLMProvider):
                 name = func.get("name")
                 arguments = func.get("arguments")
                 if call_id and name and arguments is not None:
-                    input_items.append(
-                        {
-                            "type": "function_call",
-                            "call_id": call_id,
-                            "name": name,
-                            "arguments": arguments,
-                        }
-                    )
+                    input_items.append({
+                        "type": "function_call",
+                        "call_id": call_id,
+                        "name": name,
+                        "arguments": arguments,
+                    })
 
             # Map tool outputs to function_call_output items.
             if role == "tool":
                 call_id = message.get("tool_call_id") or message.get("call_id")
                 if call_id:
-                    input_items.append(
-                        {
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": content or "",
-                        }
-                    )
+                    input_items.append({
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": content or "",
+                    })
                 elif content:
                     # Fallback to preserve tool output if call_id is missing.
-                    input_items.append(
-                        make_message_item("user", f"Tool result: {content}")
-                    )
+                    input_items.append(make_message_item("user", f"Tool result: {content}"))
 
         return input_items
 

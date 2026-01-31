@@ -1,6 +1,5 @@
 """Web search tool for LLM."""
 
-import json
 from typing import Any, Dict
 from urllib.parse import quote_plus
 
@@ -73,9 +72,7 @@ For now, you can manually search for '{query}' and provide the information."""
                     if not results:
                         return f"No results found for: {query}"
 
-                    return f"Search results for '{query}':\\n\\n" + "\\n\\n".join(
-                        results
-                    )
+                    return f"Search results for '{query}':\\n\\n" + "\\n\\n".join(results)
 
         except Exception as e:
             return f"Error performing web search: {e}"

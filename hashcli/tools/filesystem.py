@@ -1,6 +1,5 @@
 """File system operations tool for LLM."""
 
-import os
 from pathlib import Path
 from typing import Any, Dict
 
@@ -99,9 +98,7 @@ class FileSystemTool(Tool):
         except Exception as e:
             return f"Error writing file: {e}"
 
-    async def _list_directory(
-        self, arguments: Dict[str, Any], config: HashConfig
-    ) -> str:
+    async def _list_directory(self, arguments: Dict[str, Any], config: HashConfig) -> str:
         """List contents of a directory."""
         directory_path = arguments.get("directory_path", ".")
         show_hidden = arguments.get("show_hidden", False)
@@ -138,7 +135,7 @@ class FileSystemTool(Tool):
                                 size = f"({file_size/1024:.1f}KB)"
                             else:
                                 size = f"({file_size/(1024*1024):.1f}MB)"
-                        except:
+                        except Exception:
                             size = "(unknown size)"
 
                     entries.append(f"{entry_type:<4} {entry.name} {size}")

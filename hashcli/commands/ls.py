@@ -1,8 +1,6 @@
 """LS command implementation for cross-platform directory listing."""
 
-import os
 import platform
-from pathlib import Path
 from typing import List
 
 from ..command_proxy import SystemCommand

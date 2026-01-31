@@ -25,7 +25,7 @@ class ShellTool(Tool):
 
         # Extract arguments
         command = arguments.get("command", "")
-        description = arguments.get("description", "Shell command")
+        arguments.get("description", "Shell command")
 
         if not command:
             return "No command provided."
@@ -69,9 +69,7 @@ class ShellTool(Tool):
                 output += f"Exit code: {result.returncode}"
 
             if not output:
-                output = (
-                    f"Command completed successfully (exit code: {result.returncode})"
-                )
+                output = f"Command completed successfully (exit code: {result.returncode})"
 
             return output.strip()
 

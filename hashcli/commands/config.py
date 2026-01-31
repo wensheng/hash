@@ -35,24 +35,14 @@ class ConfigCommand(Command):
         output += f"  Provider: {config.llm_provider.value}\n"
         output += f"  Model: {config.get_current_model()}\n"
         output += f"  Max response tokens: {config.max_response_tokens}\n"
-        output += (
-            f"  API Key: {'✓ Set' if config.get_current_api_key() else '✗ Not set'}\n\n"
-        )
+        output += f"  API Key: {'✓ Set' if config.get_current_api_key() else '✗ Not set'}\n\n"
 
         # Tool Configuration
         output += "[bold blue]Tool Configuration:[/bold blue]\n"
-        output += (
-            "  Command execution:"
-            f" {'Enabled' if config.allow_command_execution else 'Disabled'}\n"
-        )
-        output += (
-            "  Confirmation required:"
-            f" {'Yes' if config.require_confirmation else 'No'}\n"
-        )
+        output += f"  Command execution: {'Enabled' if config.allow_command_execution else 'Disabled'}\n"
+        output += f"  Confirmation required: {'Yes' if config.require_confirmation else 'No'}\n"
         output += f"  Command timeout: {config.command_timeout}s\n"
-        output += (
-            f"  Sandbox commands: {'Yes' if config.sandbox_commands else 'No'}\n\n"
-        )
+        output += f"  Sandbox commands: {'Yes' if config.sandbox_commands else 'No'}\n\n"
 
         # History Configuration
         output += "[bold blue]History Configuration:[/bold blue]\n"
@@ -75,7 +65,7 @@ class ConfigCommand(Command):
         if config.allowed_commands:
             output += f"  Allowed commands: {', '.join(config.allowed_commands)}\n"
         else:
-            output += f"  Allowed commands: All (no whitelist)\n"
+            output += "  Allowed commands: All (no whitelist)\n"
         output += f"  Blocked commands: {', '.join(config.blocked_commands)}\n"
 
         return output.strip()

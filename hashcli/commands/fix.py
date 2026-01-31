@@ -19,17 +19,6 @@ class FixCommand(Command):
         description = " ".join(args)
 
         # Create a specialized prompt for coding assistance
-        coding_prompt = f"""I need help with a coding issue. Please provide a practical solution:
-
-Issue: {description}
-
-Please provide:
-1. A clear explanation of the problem
-2. A concrete solution with code examples if applicable
-3. Any relevant best practices or alternatives
-4. Commands to run if needed (I can execute them with your guidance)
-
-Focus on being practical and actionable."""
 
         # This would normally trigger LLM mode with the specialized prompt
         # For now, return a message indicating the prompt would be processed

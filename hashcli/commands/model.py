@@ -34,13 +34,11 @@ class ModelCommand(Command):
 
     def _show_current_config(self, config: HashConfig) -> str:
         """Show current model configuration."""
-        output = f"Current Configuration:\\n"
+        output = "Current Configuration:\\n"
         output += f"  Provider: {config.llm_provider.value}\\n"
         output += f"  Model: {config.get_current_model()}\\n"
-        output += (
-            f"  API Key: {'✓ Set' if config.get_current_api_key() else '✗ Not set'}\\n"
-        )
-        output += f"\\nUse '/model list' to see available models"
+        output += f"  API Key: {'✓ Set' if config.get_current_api_key() else '✗ Not set'}\\n"
+        output += "\\nUse '/model list' to see available models"
         return output
 
     def _list_available_models(self) -> str:
@@ -71,14 +69,10 @@ class ModelCommand(Command):
         if any(model_name in model for model in get_model_options(LLMProvider.OPENAI)):
             target_provider = LLMProvider.OPENAI
         # Check Anthropic models
-        elif any(
-            model_name in model for model in get_model_options(LLMProvider.ANTHROPIC)
-        ):
+        elif any(model_name in model for model in get_model_options(LLMProvider.ANTHROPIC)):
             target_provider = LLMProvider.ANTHROPIC
         # Check Google models
-        elif any(
-            model_name in model for model in get_model_options(LLMProvider.GOOGLE)
-        ):
+        elif any(model_name in model for model in get_model_options(LLMProvider.GOOGLE)):
             target_provider = LLMProvider.GOOGLE
         else:
             # Try to infer from model name patterns
@@ -90,10 +84,7 @@ class ModelCommand(Command):
                 target_provider = LLMProvider.GOOGLE
 
         if not target_provider:
-            return (
-                f"Unknown model: {model_name}\\nUse '/model list' to see available"
-                " models"
-            )
+            return f"Unknown model: {model_name}\\nUse '/model list' to see available models"
 
         # Update configuration
         config.llm_provider = target_provider
@@ -122,10 +113,7 @@ class ModelCommand(Command):
         try:
             target_provider = LLMProvider(provider_name)
         except ValueError:
-            return (
-                f"Unknown provider: {provider_name}\\nAvailable: openai, anthropic,"
-                " google"
-            )
+            return f"Unknown provider: {provider_name}\\nAvailable: openai, anthropic, google"
 
         # Update configuration
         config.llm_provider = target_provider

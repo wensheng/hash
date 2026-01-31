@@ -1,9 +1,7 @@
 """LLM handler with provider abstraction and tool calling capabilities."""
 
-import asyncio
 import json
-from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional
 
 from rich.console import Console
 from rich.prompt import Confirm
@@ -17,9 +15,7 @@ console = Console()
 class ToolCall:
     """Represents a tool call request from the LLM."""
 
-    def __init__(
-        self, name: str, arguments: Dict[str, Any], call_id: Optional[str] = None
-    ):
+    def __init__(self, name: str, arguments: Dict[str, Any], call_id: Optional[str] = None):
         self.name = name
         self.arguments = arguments
         self.call_id = call_id or f"call_{name}_{hash(str(arguments))}"
@@ -53,15 +49,11 @@ class LLMHandler:
     def __init__(self, config: HashConfig):
         self.config = config
         self.provider = self._get_provider()
-        self.history = (
-            ConversationHistory(config.history_dir) if config.history_enabled else None
-        )
+        self.history = ConversationHistory(config.history_dir) if config.history_enabled else None
         self.current_session_id = None
         self.last_tool_calls_executed = False
 
-    async def chat(
-        self, message: str, stream_handler: Optional[Callable[[str], None]] = None
-    ) -> str:
+    async def chat(self, message: str, stream_handler: Optional[Callable[[str], None]] = None) -> str:
         """Main chat interface that handles the complete conversation flow."""
         try:
             self.last_tool_calls_executed = False
@@ -86,15 +78,11 @@ class LLMHandler:
             # Handle tool calls if present
             if response.has_tool_calls():
                 self.last_tool_calls_executed = True
-                response = await self._handle_tool_calls(
-                    response, context_messages, stream_handler
-                )
+                response = await self._handle_tool_calls(response, context_messages, stream_handler)
 
             # Add assistant response to history
             if self.history:
-                self.history.add_message(
-                    self.current_session_id, "assistant", response.content
-                )
+                self.history.add_message(self.current_session_id, "assistant", response.content)
 
             return response.content
 
@@ -154,13 +142,16 @@ Guidelines:
 - Suggest alternatives when appropriate
 - Prioritize security and best practices
 - Indicate when you're unsure and suggest verification steps
+- **Prefer simple, single-line commands** (e.g., `seq`, `grep`, `find`) over complex shell loops or scripts. Specifically, use `seq` for number sequences.
 
 Tool usage policy:
-- When a question can be answered deterministically by a tool, call the tool first and answer from its output.
-- If the answer depends on the current system state, date/time, or filesystem, call a tool.
-- For time/date questions (e.g., "what day is today", "current time"), use the execute_shell_command tool (e.g., `date` or `date +%A`) and answer using its output.
-- If a user asks something that can be checked locally (e.g., current directory, username, OS info, available files), use the appropriate tool instead of guessing.
-- If the user asks how to perform a shell task and a safe, direct command is appropriate, include the command in your answer and append a final line exactly: "do you want execute `<command>`?" (use backticks around the command). Do not execute the command unless the user explicitly confirms.
+- **Action Requests:** If the user asks you to perform an action or retrieve information directly (e.g., "show me disk usage", "list files", "read README.md", "check time"), **CALL THE TOOL DIRECTLY**. Do not ask for confirmation in text; the system handles that.
+- **Informational/How-to Requests:** If the user asks *how* to do something (e.g., "how do I check disk usage", "explain ls command"), provide a text explanation. **DO NOT call the tool**. Instead, append a final line exactly: "do you want execute `<command>`?" (where `<command>` is the **full command string with all arguments**, e.g., `ls -la`, wrapped in backticks).
+- **Time/Date:** For "what day is today" or "current time", use `execute_shell_command` with `date`.
+- **System Checks:** For local checks (OS, username, directory), use the appropriate tool.
+- **Ambiguity:** If unsure whether to execute, err on the side of explaining (text response).
+
+Never include the confirmation line ("do you want execute...") if you are calling a tool. That line is ONLY for text-based suggestions where you did NOT call a tool.
 
 You have access to tools that can interact with the system. Use them appropriately to assist the user effectively."""
 
@@ -174,10 +165,7 @@ You have access to tools that can interact with the system. Use them appropriate
                 "type": "function",
                 "function": {
                     "name": "execute_shell_command",
-                    "description": (
-                        "Execute a shell command and return its output. Use with"
-                        " caution."
-                    ),
+                    "description": "Execute a shell command and return its output. Use with caution.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -187,12 +175,11 @@ You have access to tools that can interact with the system. Use them appropriate
                             },
                             "description": {
                                 "type": "string",
-                                "description": (
-                                    "Brief description of what this command does"
-                                ),
+                                "description": "Brief description of what this command does",
                             },
                         },
                         "required": ["command", "description"],
+                        "additionalProperties": False,
                     },
                 },
             })
@@ -213,6 +200,7 @@ You have access to tools that can interact with the system. Use them appropriate
                             }
                         },
                         "required": ["file_path"],
+                        "additionalProperties": False,
                     },
                 },
             },
@@ -234,6 +222,7 @@ You have access to tools that can interact with the system. Use them appropriate
                             },
                         },
                         "required": ["file_path", "content"],
+                        "additionalProperties": False,
                     },
                 },
             },
@@ -255,7 +244,8 @@ You have access to tools that can interact with the system. Use them appropriate
                                 "default": False,
                             },
                         },
-                        "required": ["directory_path"],
+                        "required": ["directory_path", "show_hidden"],
+                        "additionalProperties": False,
                     },
                 },
             },
@@ -302,9 +292,7 @@ You have access to tools that can interact with the system. Use them appropriate
                 # Execute tool call
                 try:
                     result = await executor.execute(tool_call.arguments, self.config)
-                    tool_results.append(
-                        {"tool_call_id": tool_call.call_id, "output": str(result)}
-                    )
+                    tool_results.append({"tool_call_id": tool_call.call_id, "output": str(result)})
                 except Exception as e:
                     tool_results.append({
                         "tool_call_id": tool_call.call_id,
@@ -347,11 +335,9 @@ You have access to tools that can interact with the system. Use them appropriate
 
     def _get_user_confirmation(self, tool_call: ToolCall) -> bool:
         """Get user confirmation for a tool call."""
-        console.print(f"\n[bold yellow]Tool Call Request:[/bold yellow]")
+        console.print("\n[bold yellow]Tool Call Request:[/bold yellow]")
         console.print(f"Function: [cyan]{tool_call.name}[/cyan]")
-        console.print(
-            f"Arguments: [dim]{json.dumps(tool_call.arguments, indent=2)}[/dim]"
-        )
+        console.print(f"Arguments: [dim]{json.dumps(tool_call.arguments, indent=2)}[/dim]")
 
         return Confirm.ask("Execute this tool call?", default=False)
 

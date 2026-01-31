@@ -6,7 +6,7 @@ from google import genai
 from google.genai import types
 
 from ..config import HashConfig
-from ..llm_handler import LLMResponse
+from ..llm_handler import LLMResponse, ToolCall
 from .base import LLMProvider
 
 
@@ -30,10 +30,16 @@ class GoogleProvider(LLMProvider):
             # Convert messages to Google format
             google_messages = self._format_messages_for_provider(messages)
 
+            # Convert tools to Google format
+            google_tools = None
+            if tools:
+                google_tools = self._convert_tools_to_google_format(tools)
+
             # Prepare generation config
             config = types.GenerateContentConfig(
                 temperature=0.7,
                 max_output_tokens=self.config.max_response_tokens,
+                tools=google_tools,
                 safety_settings=[
                     types.SafetySetting(
                         category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
@@ -51,7 +57,7 @@ class GoogleProvider(LLMProvider):
                         category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
                         threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
                     ),
-                ]
+                ],
             )
 
             # Generate content
@@ -78,40 +84,36 @@ class GoogleProvider(LLMProvider):
 
             # Extract content
             tool_calls: List[Any] = []
-            if streamed_content:
-                usage = None
-                if response and response.usage_metadata:
-                    usage = {
-                        "prompt_tokens": response.usage_metadata.prompt_token_count or 0,
-                        "completion_tokens": response.usage_metadata.candidates_token_count
-                        or 0,
-                        "total_tokens": response.usage_metadata.total_token_count or 0,
-                    }
-                return LLMResponse(
-                    content="".join(streamed_content),
-                    tool_calls=tool_calls,
-                    model=self.model_name,
-                    usage=usage,
-                )
 
-            content = ""
+            # If streaming, we might have partial text but usually tool calls come in the final response object too
+            # However, for simplicity, we focus on the final response object for tool calls.
+
+            content = "".join(streamed_content)
+
             if response and response.candidates and len(response.candidates) > 0:
                 candidate = response.candidates[0]
 
-                if candidate.content.parts:
+                if candidate.content and candidate.content.parts:
                     for part in candidate.content.parts:
-                        if part.text:
+                        if part.text and not content:  # Avoid duplicating if already streamed
                             content += part.text
 
-                # Note: Tool calls handling would go here when implemented
+                        if part.function_call:
+                            # Extract tool call
+                            tool_calls.append(
+                                ToolCall(
+                                    name=part.function_call.name,
+                                    arguments=part.function_call.args,
+                                    call_id=f"call_{part.function_call.name}_{hash(str(part.function_call.args))}",
+                                )
+                            )
 
                 # Extract usage information
                 usage = None
                 if response.usage_metadata:
                     usage = {
                         "prompt_tokens": response.usage_metadata.prompt_token_count or 0,
-                        "completion_tokens": response.usage_metadata.candidates_token_count
-                        or 0,
+                        "completion_tokens": response.usage_metadata.candidates_token_count or 0,
                         "total_tokens": response.usage_metadata.total_token_count or 0,
                     }
 
@@ -123,10 +125,7 @@ class GoogleProvider(LLMProvider):
                 )
 
             return LLMResponse(
-                content=(
-                    "No response generated. Content may have been blocked by safety"
-                    " filters."
-                ),
+                content="No response generated. Content may have been blocked by safety filters.",
                 model=self.model_name,
             )
 
@@ -135,17 +134,62 @@ class GoogleProvider(LLMProvider):
 
             # Handle specific Google AI errors - adapting strings as they might have changed
             if "API_KEY_INVALID" in error_message:
-                error_message = (
-                    "Invalid Google AI API key. Please check your configuration."
-                )
+                error_message = "Invalid Google AI API key. Please check your configuration."
             elif "429" in error_message or "quota" in error_message.lower():
                 error_message = "API quota exceeded. Please try again later."
             elif "blocked" in error_message.lower():
                 error_message = "Content was blocked by Google's safety filters."
 
-            return LLMResponse(
-                content=f"Google AI error: {error_message}", model=self.model_name
-            )
+            return LLMResponse(content=f"Google AI error: {error_message}", model=self.model_name)
+
+    def _convert_tools_to_google_format(self, tools: List[Dict[str, Any]]) -> List[types.Tool]:
+        """Convert OpenAI-style tools to Google AI format."""
+        google_tools = []
+
+        # Google expects a list of Tool objects, where each Tool contains function_declarations
+
+        function_declarations = []
+
+        for tool in tools:
+            if tool.get("type") == "function":
+                function = tool.get("function", {})
+                name = function.get("name")
+                description = function.get("description")
+                parameters = function.get("parameters")
+
+                # Clean parameters schema to remove unsupported fields like additionalProperties
+                cleaned_parameters = self._clean_parameter_schema(parameters)
+
+                function_declarations.append(
+                    types.FunctionDeclaration(name=name, description=description, parameters=cleaned_parameters)
+                )
+
+        if function_declarations:
+            google_tools.append(types.Tool(function_declarations=function_declarations))
+
+        return google_tools
+
+    def _clean_parameter_schema(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """Recursively remove unsupported fields from parameter schema."""
+        if not isinstance(schema, dict):
+            return schema
+
+        cleaned = {}
+        for key, value in schema.items():
+            # Google API doesn't support additionalProperties in the schema
+            if key in ("additionalProperties", "additional_properties"):
+                continue
+
+            if isinstance(value, dict):
+                cleaned[key] = self._clean_parameter_schema(value)
+            elif isinstance(value, list):
+                cleaned[key] = [
+                    self._clean_parameter_schema(item) if isinstance(item, dict) else item for item in value
+                ]
+            else:
+                cleaned[key] = value
+
+        return cleaned
 
     def get_model_name(self) -> str:
         """Get the current model name."""
@@ -159,13 +203,9 @@ class GoogleProvider(LLMProvider):
             and self.model_name is not None
         )
 
-    def _format_messages_for_provider(
-        self, messages: List[Dict[str, str]]
-    ) -> List[types.Content]:
+    def _format_messages_for_provider(self, messages: List[Dict[str, str]]) -> List[types.Content]:
         """Convert OpenAI format messages to Google AI format."""
         contents = []
-        
-        system_instruction = None
 
         for message in messages:
             role = message["role"]
@@ -180,26 +220,26 @@ class GoogleProvider(LLMProvider):
                 # Let's try to map to 'user'/'model' roles as 'system' often clashes in pure chat history
                 # unless using system_instruction.
                 # For compatibility with the previous logic which merged it:
-                
+
                 # The previous implementation prepended "System: " to user messages.
                 # We can replicate a similar behavior or use proper parts.
-                
+
                 parts = [types.Part(text=f"System: {content}")]
                 contents.append(types.Content(role="user", parts=parts))
-                # Add an acknowledgment to simulate system processing if needed, 
+                # Add an acknowledgment to simulate system processing if needed,
                 # or just append to the next user message if we could looking ahead.
                 # To be safe and simple: just send it as a user message.
-                
+
             elif role == "user":
                 parts = [types.Part(text=content)]
                 contents.append(types.Content(role="user", parts=parts))
-                
+
             elif role == "assistant":
                 parts = [types.Part(text=content)]
                 contents.append(types.Content(role="model", parts=parts))
-                
+
             elif role == "tool":
-                # Tool results - not fully implemented in this basic migration but 
+                # Tool results - not fully implemented in this basic migration but
                 # mapping to 'user' with context explanation
                 parts = [types.Part(text=f"Tool Result: {content}")]
                 contents.append(types.Content(role="user", parts=parts))
@@ -207,13 +247,13 @@ class GoogleProvider(LLMProvider):
         # Consolidate adjacent messages of the same role if necessary?
         # The API usually requires alternating User/Model.
         # If we have multiple User messages (e.g. System + User), we might need to merge them.
-        
+
         merged_contents = []
         if not contents:
             return []
 
         current_content = contents[0]
-        
+
         for next_content in contents[1:]:
             if next_content.role == current_content.role:
                 # Merge parts
@@ -221,11 +261,11 @@ class GoogleProvider(LLMProvider):
             else:
                 merged_contents.append(current_content)
                 current_content = next_content
-        
+
         merged_contents.append(current_content)
 
         return merged_contents
-    
+
     def set_model(self, model: str):
         """Change the model being used."""
         self.model_name = model

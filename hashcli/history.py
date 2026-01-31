@@ -6,7 +6,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -82,9 +82,7 @@ class ConversationHistory:
 
             conn.commit()
 
-    def start_session(
-        self, title: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def start_session(self, title: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> str:
         """Start a new conversation session."""
         session_id = str(uuid.uuid4())
 
@@ -162,17 +160,13 @@ class ConversationHistory:
                     "role": row["role"],
                     "content": row["content"],
                     "timestamp": row["timestamp"],
-                    "metadata": (
-                        json.loads(row["metadata"]) if row["metadata"] else None
-                    ),
+                    "metadata": json.loads(row["metadata"]) if row["metadata"] else None,
                 }
                 messages.append(message)
 
             return messages
 
-    def get_recent_messages(
-        self, session_id: str, limit: int = 20
-    ) -> List[Dict[str, str]]:
+    def get_recent_messages(self, session_id: str, limit: int = 20) -> List[Dict[str, str]]:
         """Get recent messages for a session in LLM format."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -188,9 +182,7 @@ class ConversationHistory:
             )
 
             messages = []
-            for row in reversed(
-                cursor.fetchall()
-            ):  # Reverse to get chronological order
+            for row in reversed(cursor.fetchall()):  # Reverse to get chronological order
                 messages.append({"role": row["role"], "content": row["content"]})
 
             return messages
@@ -412,15 +404,15 @@ class ConversationHistory:
     def _export_to_markdown(self, data: Dict[str, Any]) -> str:
         """Export conversation to markdown format."""
         lines = [
-            f"# Conversation Export",
-            f"",
+            "# Conversation Export",
+            "",
             f"**Session ID:** {data['session']['id']}",
             f"**Created:** {data['session']['created']}",
             f"**Messages:** {data['session']['message_count']}",
             f"**Exported:** {data['exported_at']}",
-            f"",
-            f"---",
-            f"",
+            "",
+            "---",
+            "",
         ]
 
         for i, message in enumerate(data["messages"], 1):
@@ -431,11 +423,11 @@ class ConversationHistory:
             lines.extend([
                 f"## Message {i} - {role}",
                 f"*{timestamp}*",
-                f"",
+                "",
                 content,
-                f"",
-                f"---",
-                f"",
+                "",
+                "---",
+                "",
             ])
 
         return "\\n".join(lines)

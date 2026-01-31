@@ -13,17 +13,17 @@ if __name__ == "__main__" and __package__ is None:
 import asyncio
 import os
 import re
+import shlex
 import subprocess
 from typing import Optional
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 import typer
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Confirm
-from rich.text import Text
 
 from hashcli.command_proxy import CommandProxy
 from hashcli.config import (
@@ -48,90 +48,313 @@ app = typer.Typer(
 console = Console()
 
 
-def _extract_suggested_command(response_text: str) -> Optional[str]:
+def _extract_suggested_command(response_text: str, user_query: Optional[str] = None) -> Optional[str]:
     if not response_text:
         return None
 
     def clean_command(command: str) -> str:
         cleaned = command.strip().rstrip("?.! ")
-        if (
-            len(cleaned) >= 2
-            and cleaned[0] == cleaned[-1]
-            and cleaned[0] in "\"'`"
-        ):
+        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in "\"'`":
             cleaned = cleaned[1:-1].strip()
         return cleaned
 
-    question_pattern = re.compile(
-        r"(do you want|would you like|should i)\s+(?:to\s+|me\s+to\s+)?(?:execute|run)\b",
-        re.IGNORECASE,
-    )
+    def strip_bullet_prefix(line: str) -> str:
+        stripped = line.strip()
+        stripped = re.sub(r"^(?:[-*•]\s+)", "", stripped)
+        stripped = re.sub(r"^\d+[.)]\s+", "", stripped)
+        return stripped.strip()
+
+    def is_probable_command(command: str) -> bool:
+        if not command:
+            return False
+        if "\n" in command or "\r" in command:
+            return False
+        if len(command) > 256:
+            return False
+        if "?" in command:
+            return False
+        if command.strip().endswith(":"):
+            return False
+
+        # Reject commands with shell operators we do not allow to execute.
+        forbidden_operators = ["&&", "||", ";", "|", "`", "$(", ">", "<"]
+        for op in forbidden_operators:
+            if op in command:
+                return False
+
+        lowered = command.lower()
+        if re.search(r"\b(confirm|execute|execution|please)\b", lowered):
+            return False
+
+        try:
+            parts = shlex.split(command)
+        except ValueError:
+            return False
+
+        if not parts:
+            return False
+
+        first_raw = parts[0]
+        first = first_raw.lower()
+        if first in {
+            "this",
+            "that",
+            "it",
+            "you",
+            "your",
+            "confirm",
+            "execute",
+            "please",
+        }:
+            return False
+
+        command_allowlist = {
+            "ls",
+            "pwd",
+            "whoami",
+            "date",
+            "tail",
+            "head",
+            "cat",
+            "grep",
+            "rg",
+            "find",
+            "xargs",
+            "sort",
+            "uniq",
+            "wc",
+            "du",
+            "df",
+            "ps",
+            "top",
+            "git",
+            "pip",
+            "python",
+            "pytest",
+            "npm",
+            "yarn",
+            "pnpm",
+            "node",
+            "cargo",
+            "go",
+            "make",
+            "docker",
+            "docker-compose",
+            "kubectl",
+            "curl",
+            "wget",
+            "sed",
+            "awk",
+            "chmod",
+            "chown",
+            "cp",
+            "mv",
+            "rm",
+            "mkdir",
+            "rmdir",
+            "touch",
+            "tree",
+            "uname",
+            "whereis",
+            "which",
+            "stat",
+            "ln",
+            "tar",
+            "zip",
+            "unzip",
+            "ssh",
+            "scp",
+            "less",
+            "more",
+            "echo",
+            "printf",
+            "env",
+            "seq",
+            "cut",
+            "tr",
+            "diff",
+            "cmp",
+        }
+
+        if (
+            "/" not in first_raw
+            and not first_raw.startswith("./")
+            and not first_raw.startswith("~/")
+            and first not in command_allowlist
+        ):
+            return False
+
+        return True
+
+    def extract_prefixed_command(line: str) -> Optional[str]:
+        prefixes = ("command", "run", "use", "try")
+        lowered = line.lower()
+        for prefix in prefixes:
+            if lowered.startswith(prefix):
+                remainder = line[len(prefix) :].lstrip()
+                if remainder.startswith((":", "-")):
+                    remainder = remainder[1:].lstrip()
+                candidate = clean_command(remainder)
+                if is_probable_command(candidate):
+                    return candidate
+        return None
+
+    def extract_query_tokens(text: Optional[str]) -> List[str]:
+        if not text:
+            return []
+        tokens = re.findall(r"[A-Za-z0-9_./-]+", text)
+        filtered = []
+        for token in tokens:
+            if token.isdigit():
+                filtered.append(token)
+                continue
+            if "/" in token or "." in token or "__" in token:
+                filtered.append(token.lower())
+        return filtered
+
+    query_tokens = extract_query_tokens(user_query)
+
+    def normalize_command(command: str) -> str:
+        try:
+            parts = shlex.split(command)
+        except ValueError:
+            return command
+
+        if not parts:
+            return command
+
+        cwd = Path.cwd()
+        normalized: List[str] = []
+        for part in parts:
+            replaced = False
+            if part.startswith("/path/to/") and query_tokens:
+                for token in query_tokens:
+                    if token.endswith(".md") or token.endswith(".txt"):
+                        normalized.append(token)
+                        replaced = True
+                        break
+            if replaced:
+                continue
+
+            if os.path.isabs(part):
+                try:
+                    rel = Path(part).resolve().relative_to(cwd)
+                    normalized.append(str(rel))
+                except Exception:
+                    normalized.append(part)
+            else:
+                normalized.append(part)
+
+        def quote_part(part: str) -> str:
+            if re.search(r"\s", part):
+                return shlex.quote(part)
+            return part
+
+        return " ".join(quote_part(part) for part in normalized)
+
+    def add_candidate(candidate: str, source: str, position: int = 0) -> Optional[dict]:
+        cleaned = clean_command(candidate)
+        if not is_probable_command(cleaned):
+            return None
+        cleaned = normalize_command(cleaned)
+        base_scores = {
+            "explicit": 100,
+            "fence": 90,
+            "dollar": 85,
+            "prefixed": 80,
+            "inline": 70,
+            "bare": 60,
+        }
+        score = base_scores.get(source, 50)
+
+        try:
+            parts = shlex.split(cleaned)
+        except ValueError:
+            parts = cleaned.split()
+
+        if len(parts) >= 2:
+            score += 10
+        if len(parts) == 1:
+            score -= 20
+        if query_tokens and any(token in cleaned.lower() for token in query_tokens):
+            score += 20
+        if re.search(r"\s-", cleaned):
+            score += 5
+        # Prefer shorter commands when otherwise similar.
+        score -= min(len(cleaned), 200) / 200
+        return {
+            "score": score,
+            "position": position,
+            "command": cleaned,
+            "parts": parts,
+        }
+
+    candidates = []
+
+    match = re.search(r"do you want execute\s+`([^`]+)`", response_text, re.IGNORECASE)
+    if match:
+        item = add_candidate(match.group(1), "explicit")
+        if item:
+            candidates.append(item)
+
+    fence_matches = re.findall(r"```[a-zA-Z0-9_-]*\s*([^`]+?)\s*```", response_text, re.DOTALL)
+    for idx, fence in enumerate(fence_matches):
+        for line in fence.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("$"):
+                stripped = stripped.lstrip("$").strip()
+            item = add_candidate(stripped, "fence", idx)
+            if item:
+                candidates.append(item)
 
     lines = response_text.splitlines()
-    for i, line in enumerate(lines):
-        if question_pattern.search(line):
-            inline_cmd = re.search(r"`([^`]+)`", line)
-            if inline_cmd:
-                return clean_command(inline_cmd.group(1))
+    for idx, line in enumerate(lines):
+        stripped = strip_bullet_prefix(line)
+        if not stripped:
+            continue
+        prefixed = extract_prefixed_command(stripped)
+        if prefixed:
+            item = add_candidate(prefixed, "prefixed", idx)
+            if item:
+                candidates.append(item)
+            continue
+        if stripped.startswith("$"):
+            item = add_candidate(stripped.lstrip("$").strip(), "dollar", idx)
+            if item:
+                candidates.append(item)
+            continue
+        item = add_candidate(stripped, "bare", idx)
+        if item:
+            candidates.append(item)
 
-            tail_cmd = re.search(r"(?:execute|run)\s+(.+)", line, re.IGNORECASE)
-            if tail_cmd:
-                candidate = clean_command(tail_cmd.group(1))
-                if candidate and "command" not in candidate.lower():
-                    return candidate
+    inline_commands = re.findall(r"`([^`]+)`", response_text)
+    for idx, inline in enumerate(inline_commands):
+        item = add_candidate(inline, "inline", idx)
+        if item:
+            candidates.append(item)
 
-            if i + 1 < len(lines):
-                next_line = lines[i + 1].strip()
-                next_inline = re.search(r"`([^`]+)`", next_line)
-                if next_inline:
-                    return clean_command(next_inline.group(1))
+    if not candidates:
+        return None
 
-                if next_line.startswith("```"):
-                    fence_content = next_line.strip("`").strip()
-                    if fence_content:
-                        return clean_command(fence_content)
-                    for j in range(i + 2, len(lines)):
-                        block_line = lines[j].strip()
-                        if block_line.startswith("```"):
-                            break
-                        if block_line:
-                            return clean_command(block_line)
-                if next_line.startswith("$"):
-                    return clean_command(next_line.lstrip("$").strip())
+    if query_tokens:
+        matched = [c for c in candidates if all(token in c["command"].lower() for token in query_tokens)]
+        if matched:
+            matched.sort(key=lambda c: (len(c["parts"]), len(c["command"]), c["position"]))
+            return matched[0]["command"]
 
-            # Fall back to the last command-like snippet in the response.
-            fence_match = re.search(
-                r"```[a-zA-Z0-9_-]*\n([^`]+?)\n```", response_text, re.DOTALL
-            )
-            if fence_match:
-                for block_line in fence_match.group(1).splitlines():
-                    if block_line.strip():
-                        return clean_command(block_line)
-
-            inline_commands = re.findall(r"`([^`]+)`", response_text)
-            if inline_commands:
-                return clean_command(inline_commands[-1])
-
-    if re.search(r"\b(execute|run|command|use|try)\b", response_text, re.IGNORECASE):
-        fence_match = re.search(
-            r"```[a-zA-Z0-9_-]*\n([^`]+?)\n```", response_text, re.DOTALL
-        )
-        if fence_match:
-            for line in fence_match.group(1).splitlines():
-                if line.strip():
-                    return clean_command(line)
-
-        inline_commands = re.findall(r"`([^`]+)`", response_text)
-        if inline_commands:
-            return clean_command(inline_commands[-1])
-
-    return None
+    candidates.sort(key=lambda c: (c["score"], -c["position"]), reverse=True)
+    return candidates[0]["command"]
 
 
 async def _maybe_execute_suggested_command(
-    response_text: str, config, quiet: bool = False
+    response_text: str,
+    config,
+    quiet: bool = False,
+    user_query: Optional[str] = None,
 ) -> None:
-    suggested_command = _extract_suggested_command(response_text)
+    suggested_command = _extract_suggested_command(response_text, user_query=user_query)
     if not suggested_command:
         return
 
@@ -209,28 +432,15 @@ def show_config_callback(value: bool):
             console.print("\n[bold blue]Hash CLI Configuration[/bold blue]")
             console.print(f"Provider: [cyan]{config.llm_provider.value}[/cyan]")
             console.print(f"Model: [cyan]{config.get_current_model()}[/cyan]")
+            console.print(f"API Key: [green]{'✓ Set' if config.get_current_api_key() else '✗ Not set'}[/green]")
             console.print(
-                "API Key:"
-                f" [green]{'✓ Set' if config.get_current_api_key() else '✗ Not set'}[/green]"
+                f"Command execution: [cyan]{'Enabled' if config.allow_command_execution else 'Disabled'}[/cyan]"
             )
-            console.print(
-                "Command execution:"
-                f" [cyan]{'Enabled' if config.allow_command_execution else 'Disabled'}[/cyan]"
-            )
-            console.print(
-                "Confirmation required:"
-                f" [cyan]{'Yes' if config.require_confirmation else 'No'}[/cyan]"
-            )
-            console.print(
-                "History:"
-                f" [cyan]{'Enabled' if config.history_enabled else 'Disabled'}[/cyan]"
-            )
+            console.print(f"Confirmation required: [cyan]{'Yes' if config.require_confirmation else 'No'}[/cyan]")
+            console.print(f"History: [cyan]{'Enabled' if config.history_enabled else 'Disabled'}[/cyan]")
             if config.history_enabled:
                 console.print(f"History location: [dim]{config.history_dir}[/dim]")
-            console.print(
-                "Streaming:"
-                f" [cyan]{'Enabled' if config.streaming else 'Disabled'}[/cyan]"
-            )
+            console.print(f"Streaming: [cyan]{'Enabled' if config.streaming else 'Disabled'}[/cyan]")
 
         except Exception as e:
             console.print(f"[bold red]Error loading configuration:[/bold red] {e}")
@@ -269,17 +479,13 @@ def config_callback(value: bool):
             raise typer.Exit(1)
 
         # Select Model
-        console.print(
-            f"\n[bold]2. Select {provider.value.capitalize()} Model:[/bold]"
-        )
+        console.print(f"\n[bold]2. Select {provider.value.capitalize()} Model:[/bold]")
         options = get_model_options(provider)
         for i, model in enumerate(options, 1):
             console.print(f"   {i}) {model}")
         console.print(f"   {len(options) + 1}) Custom model name")
 
-        model_choice = typer.prompt(
-            f"Select model (1-{len(options)+1})", type=int, default=1
-        )
+        model_choice = typer.prompt(f"Select model (1-{len(options)+1})", type=int, default=1)
 
         if 1 <= model_choice <= len(options):
             selected_model = options[model_choice - 1]
@@ -325,12 +531,8 @@ def setup_callback(value: bool):
 
     # Support zsh and bash
     if shell_name not in ("zsh", "bash"):
-        console.print(
-            "[yellow]Shell integration setup currently supports zsh and bash only.[/yellow]"
-        )
-        console.print(
-            f"Detected shell: [dim]{shell_name or 'unknown'}[/dim]"
-        )
+        console.print("[yellow]Shell integration setup currently supports zsh and bash only.[/yellow]")
+        console.print(f"Detected shell: [dim]{shell_name or 'unknown'}[/dim]")
         console.print("For other shells, use the scripts in the shell directory.")
         raise typer.Exit(1)
 
@@ -351,6 +553,7 @@ def setup_callback(value: bool):
             if package_shell_dir.exists():
                 # Copy the entire shell directory
                 import shutil
+
                 shutil.copytree(package_shell_dir, user_shell_dir, dirs_exist_ok=True)
                 # Make scripts executable
                 for script in user_shell_dir.rglob("*.sh"):
@@ -360,14 +563,10 @@ def setup_callback(value: bool):
                     script.chmod(0o755)
                 console.print(f"[dim]Shell scripts copied to {user_shell_dir}[/dim]")
             else:
-                console.print(
-                    "[bold red]Unable to locate shell scripts in package.[/bold red]"
-                )
+                console.print("[bold red]Unable to locate shell scripts in package.[/bold red]")
                 raise typer.Exit(1)
         except Exception as e:
-            console.print(
-                f"[bold red]Failed to copy shell scripts:[/bold red] {e}"
-            )
+            console.print(f"[bold red]Failed to copy shell scripts:[/bold red] {e}")
             raise typer.Exit(1)
 
     # Run install script from user directory
@@ -378,9 +577,7 @@ def setup_callback(value: bool):
             check=True,
         )
     except subprocess.CalledProcessError as exc:
-        console.print(
-            "[bold red]Shell integration setup failed.[/bold red]"
-        )
+        console.print("[bold red]Shell integration setup failed.[/bold red]")
         raise typer.Exit(exc.returncode) from exc
 
     raise typer.Exit()
@@ -389,18 +586,14 @@ def setup_callback(value: bool):
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    query: List[str] = typer.Argument(
-        None, help="Query or command to execute. Use /command for proxy mode."
-    ),
+    query: List[str] = typer.Argument(None, help="Query or command to execute. Use /command for proxy mode."),
     debug: bool = typer.Option(
         False,
         "--debug",
         "-d",
         help="Enable debug output and detailed error information",
     ),
-    config_file: Optional[str] = typer.Option(
-        None, "--config-file", "-c", help="Path to custom configuration file"
-    ),
+    config_file: Optional[str] = typer.Option(None, "--config-file", "-c", help="Path to custom configuration file"),
     model: Optional[str] = typer.Option(
         None,
         "--model",
@@ -413,12 +606,8 @@ def main(
         "-p",
         help="Override LLM provider (openai, anthropic, google)",
     ),
-    no_confirm: bool = typer.Option(
-        False, "--no-confirm", "-y", help="Skip confirmation prompts for tool calls"
-    ),
-    quiet: bool = typer.Option(
-        False, "--quiet", "-q", help="Minimize output, show only results"
-    ),
+    no_confirm: bool = typer.Option(False, "--no-confirm", "-y", help="Skip confirmation prompts for tool calls"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Minimize output, show only results"),
     version: Optional[bool] = typer.Option(
         None,
         "--version",
@@ -523,13 +712,11 @@ async def execute_llm_mode(input_text: str, config, quiet: bool = False):
         elif result:
             display_result(result, config, quiet)
         if final_text and not handler.last_tool_calls_executed:
-            await _maybe_execute_suggested_command(final_text, config, quiet)
+            await _maybe_execute_suggested_command(final_text, config, quiet, user_query=input_text)
         return
 
     if not quiet:
-        with console.status(
-            f"[dim]Thinking with {config.get_current_model()}...[/dim]"
-        ):
+        with console.status(f"[dim]Thinking with {config.get_current_model()}...[/dim]"):
             result = await handler.chat(input_text)
     else:
         result = await handler.chat(input_text)
@@ -537,7 +724,7 @@ async def execute_llm_mode(input_text: str, config, quiet: bool = False):
     if result:
         display_result(result, config, quiet)
         if not handler.last_tool_calls_executed:
-            await _maybe_execute_suggested_command(result, config, quiet)
+            await _maybe_execute_suggested_command(result, config, quiet, user_query=input_text)
 
 
 def display_result(result: str, config, quiet: bool = False):
@@ -551,9 +738,7 @@ def display_result(result: str, config, quiet: bool = False):
     elif config.rich_output:
         # Rich formatted output
         console.print()
-        console.print(
-            Panel(result, title="[bold green]Result[/bold green]", border_style="green")
-        )
+        console.print(Panel(result, title="[bold green]Result[/bold green]", border_style="green"))
     else:
         # Plain text output
         console.print("\n[bold green]Result:[/bold green]")
