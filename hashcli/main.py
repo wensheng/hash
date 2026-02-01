@@ -22,6 +22,7 @@ from typing import List
 import typer
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.text import Text
 from rich.prompt import Confirm
 
 from hashcli.command_proxy import CommandProxy
@@ -740,15 +741,16 @@ def display_result(result: str, config, quiet: bool = False):
 
     if quiet:
         # Minimal output
-        console.print(result)
+        console.print(result, markup=False, soft_wrap=True)
     elif config.rich_output:
         # Rich formatted output
+        renderable = Text(result, overflow="fold")
         console.print()
-        console.print(Panel(result, title="[bold green]Result[/bold green]", border_style="green"))
+        console.print(Panel(renderable, title="[bold green]Result[/bold green]", border_style="green"))
     else:
         # Plain text output
         console.print("\n[bold green]Result:[/bold green]")
-        console.print(result)
+        console.print(result, markup=False, soft_wrap=True)
 
 
 def handle_error(error: Exception, debug: bool = False):
