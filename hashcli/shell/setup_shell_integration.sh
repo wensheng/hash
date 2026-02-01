@@ -24,7 +24,7 @@ hash-magic-execute() {
         local cmd="${BUFFER#\#}"
         # Execute hashcli with the command
         zle -I
-        hashcli $cmd < /dev/tty
+        hcli $cmd < /dev/tty
         # Clear buffer
         BUFFER=""
         # Redraw prompt
@@ -55,7 +55,7 @@ function hashcli_intercept --on-event fish_preexec
         # Extract command after #
         set -l hashcli (string sub -s 2 $cmd)
         # Execute hashcli with the command
-        hashcli $hashcli < /dev/tty
+        hcli $hashcli < /dev/tty
         # Clear commandline
         commandline -r ""
         # Cancel execution of the original command
@@ -65,7 +65,7 @@ function hashcli_intercept --on-event fish_preexec
 end
 
 # Fish completion for hashcli (basic)
-complete -c hashcli -f -a "(__fish_complete_subcommand)"
+complete -c hcli -f -a "(__fish_complete_subcommand)"
 EOF
 
 echo "Shell integrations setup complete!"

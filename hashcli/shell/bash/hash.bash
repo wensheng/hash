@@ -27,7 +27,7 @@ hash_magic_execute() {
         # Execute hashcli with the command
         if [[ -n "$cmd" ]]; then
             echo  # New line for output
-            hashcli "$cmd" < /dev/tty
+            hcli "$cmd" < /dev/tty
             local exit_code=$?
             echo  # Another new line
 
@@ -38,7 +38,7 @@ hash_magic_execute() {
         else
             # Empty command after #, just show help
             echo  # New line
-            hashcli "/help"
+            hcli "/help"
             echo  # Another new line
         fi
 
@@ -57,8 +57,8 @@ bind -x '"\C-j": hash_magic_execute'  # Also bind Ctrl+J (alternative newline)
 
 # Function to check if hashcli is available
 hash_check_availability() {
-    if ! command -v hashcli >/dev/null 2>&1; then
-        echo "Warning: hashcli command not found. Please ensure Hash CLI is installed and in your PATH."
+    if ! command -v hcli >/dev/null 2>&1; then
+        echo "Warning: hcli command not found. Please ensure Hash CLI is installed and in your PATH."
         return 1
     fi
     return 0

@@ -15,7 +15,7 @@ Import-Module PSReadLine -Force
 
 # Global variables for Hash integration
 $HashConfig = @{
-    ExecutablePath = "hashcli"
+    ExecutablePath = "hcli"
     HistoryFile = "$env:USERPROFILE\.hashcli\powershell_history.json"
     EnableLogging = $false
 }
@@ -144,12 +144,12 @@ function Test-HashIntegration {
 
     Write-Host "Testing Hash CLI integration..."
 
-    # Check if hashcli is available
+    # Check if hcli is available
     try {
         $version = & $HashConfig.ExecutablePath --version 2>&1
-        Write-Host "✓ hashcli executable found: $version" -ForegroundColor Green
+        Write-Host "✓ hcli executable found: $version" -ForegroundColor Green
     } catch {
-        Write-Host "✗ hashcli executable not found" -ForegroundColor Red
+        Write-Host "✗ hcli executable not found" -ForegroundColor Red
         return $false
     }
 

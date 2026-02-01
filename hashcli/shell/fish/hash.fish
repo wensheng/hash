@@ -9,7 +9,7 @@ function hash_magic_execute --description "Execute hash commands with # prefix"
 
         if test -n "$cmd"
             echo  # New line
-            hashcli $cmd < /dev/tty
+            hcli $cmd < /dev/tty
             echo  # Another new line
         end
 

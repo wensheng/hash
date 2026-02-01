@@ -59,6 +59,7 @@ Documentation = "https://github.com/wensheng/hash/docs"
 
 [project.scripts]
 hashcli = "hashcli.main:app"
+hcli = "hashcli.main:app"
 
 [tool.setuptools]
 include-package-data = true

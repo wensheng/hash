@@ -5,29 +5,29 @@
 echo "Testing hashcli installation..."
 
 # Test basic installation
-echo "1. Testing hashcli command availability:"
-if command -v hashcli &> /dev/null; then
-    echo "   ✓ hashcli command is available"
+echo "1. Testing hcli command availability:"
+if command -v hcli &> /dev/null; then
+    echo "   ✓ hcli command is available"
 else
-    echo "   ✗ hashcli command is not available"
+    echo "   ✗ hcli command is not available"
     exit 1
 fi
 
 # Test version command
-echo "2. Testing hashcli version:"
-if hashcli version &> /dev/null; then
-    echo "   ✓ hashcli version command works"
-    hashcli version
+echo "2. Testing hcli version:"
+if hcli --version &> /dev/null; then
+    echo "   ✓ hcli version command works"
+    hcli --version
 else
-    echo "   ✗ hashcli version command failed"
+    echo "   ✗ hcli version command failed"
 fi
 
 # Test help command
-echo "3. Testing hashcli help:"
-if hashcli --help &> /dev/null; then
-    echo "   ✓ hashcli help command works"
+echo "3. Testing hcli help:"
+if hcli --help &> /dev/null; then
+    echo "   ✓ hcli help command works"
 else
-    echo "   ✗ hashcli help command failed"
+    echo "   ✗ hcli help command failed"
 fi
 
 # Test Python import
