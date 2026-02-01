@@ -719,12 +719,8 @@ async def execute_llm_mode(input_text: str, config, quiet: bool = False):
         return
 
     if not quiet:
-        if config.require_confirmation:
-            console.print(f"[dim]Thinking with {config.get_current_model()}...[/dim]")
-            result = await handler.chat(input_text)
-        else:
-            with console.status(f"[dim]Thinking with {config.get_current_model()}...[/dim]"):
-                result = await handler.chat(input_text)
+        console.print(f"[dim]Thinking with {config.get_current_model()}...[/dim]")
+        result = await handler.chat(input_text)
     else:
         result = await handler.chat(input_text)
 
