@@ -3,13 +3,11 @@
 import json
 from typing import Any, Callable, Dict, List, Optional
 
-from rich.console import Console
 from rich.prompt import Confirm
 
 from .config import HashConfig, LLMProvider
 from .history import ConversationHistory
-
-console = Console()
+from .ui import console
 
 
 class ToolCall:
@@ -265,10 +263,11 @@ You have access to tools that can interact with the system. Use them appropriate
         messages_with_tools = list(context_messages)
         current_response = response
         max_tool_rounds = 3
+        last_tool_results: List[Dict[str, Any]] = []
 
         for _ in range(max_tool_rounds):
             if not current_response.has_tool_calls():
-                return current_response
+                return self._maybe_fallback_to_tool_output(current_response, last_tool_results)
 
             tool_results = []
             for tool_call in current_response.tool_calls:
@@ -276,6 +275,7 @@ You have access to tools that can interact with the system. Use them appropriate
                 if executor is None:
                     tool_results.append({
                         "tool_call_id": tool_call.call_id,
+                        "tool_name": tool_call.name,
                         "output": f"Unknown tool: {tool_call.name}",
                     })
                     continue
@@ -285,6 +285,7 @@ You have access to tools that can interact with the system. Use them appropriate
                     if not self._get_user_confirmation(tool_call):
                         tool_results.append({
                             "tool_call_id": tool_call.call_id,
+                            "tool_name": tool_call.name,
                             "output": "User declined to execute this tool call.",
                         })
                         continue
@@ -292,10 +293,15 @@ You have access to tools that can interact with the system. Use them appropriate
                 # Execute tool call
                 try:
                     result = await executor.execute(tool_call.arguments, self.config)
-                    tool_results.append({"tool_call_id": tool_call.call_id, "output": str(result)})
+                    tool_results.append({
+                        "tool_call_id": tool_call.call_id,
+                        "tool_name": tool_call.name,
+                        "output": str(result),
+                    })
                 except Exception as e:
                     tool_results.append({
                         "tool_call_id": tool_call.call_id,
+                        "tool_name": tool_call.name,
                         "output": f"Error executing tool: {e}",
                     })
 
@@ -324,6 +330,7 @@ You have access to tools that can interact with the system. Use them appropriate
                 for result in tool_results
             ]
             messages_with_tools.extend(tool_call_messages + tool_result_messages)
+            last_tool_results = tool_results
 
             current_response = await self.provider.generate_response(
                 messages_with_tools,
@@ -331,7 +338,39 @@ You have access to tools that can interact with the system. Use them appropriate
                 stream_handler=stream_handler if self.config.streaming else None,
             )
 
-        return current_response
+        return self._maybe_fallback_to_tool_output(current_response, last_tool_results, reached_round_limit=True)
+
+    def _maybe_fallback_to_tool_output(
+        self,
+        response: LLMResponse,
+        tool_results: List[Dict[str, Any]],
+        reached_round_limit: bool = False,
+    ) -> LLMResponse:
+        """Use tool output directly when the model returns no final text."""
+        if response.content and response.content.strip():
+            return response
+        if not tool_results:
+            return response
+
+        formatted = self._format_tool_results(tool_results)
+        if reached_round_limit:
+            response.content = (
+                "No final response from the model after tool calls. "
+                "Showing the latest tool output instead.\n\n"
+                + formatted
+            )
+        else:
+            response.content = formatted
+        return response
+
+    def _format_tool_results(self, tool_results: List[Dict[str, Any]]) -> str:
+        """Format tool results for user display."""
+        chunks = []
+        for result in tool_results:
+            name = result.get("tool_name") or "tool"
+            output = result.get("output") or "No output."
+            chunks.append(f"Tool result ({name}):\n{output}")
+        return "\n\n".join(chunks)
 
     def _get_user_confirmation(self, tool_call: ToolCall) -> bool:
         """Get user confirmation for a tool call."""
@@ -339,7 +378,7 @@ You have access to tools that can interact with the system. Use them appropriate
         console.print(f"Function: [cyan]{tool_call.name}[/cyan]")
         console.print(f"Arguments: [dim]{json.dumps(tool_call.arguments, indent=2)}[/dim]")
 
-        return Confirm.ask("Execute this tool call?", default=False)
+        return Confirm.ask("Execute this tool call?", default=False, console=console)
 
     def clear_session(self):
         """Clear the current conversation session."""

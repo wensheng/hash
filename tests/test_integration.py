@@ -120,6 +120,38 @@ class TestLLMIntegration:
             assert mock_provider.generate_response.call_count == 2
 
     @pytest.mark.asyncio
+    async def test_llm_handler_tool_fallback_when_no_final_text(self, sample_config, temp_dir):
+        """Fall back to tool output when the model returns no final text."""
+        from hashcli.llm_handler import ToolCall
+
+        sample_config.history_dir = temp_dir / "history"
+        sample_config.require_confirmation = False  # Skip confirmation for test
+
+        mock_provider = MagicMock()
+        mock_provider.generate_response = AsyncMock()
+
+        tool_call = ToolCall(
+            name="execute_shell_command",
+            arguments={"command": "echo 'test'", "description": "Test command"},
+        )
+        initial_response = LLMResponse(content="", tool_calls=[tool_call], model="test-model")
+        final_response = LLMResponse(content="", tool_calls=[], model="test-model")
+
+        mock_provider.generate_response.side_effect = [initial_response, final_response]
+
+        with patch("hashcli.tools.get_tool_executor") as mock_get_tool:
+            mock_tool = MagicMock()
+            mock_tool.execute = AsyncMock(return_value="test output")
+            mock_get_tool.return_value = mock_tool
+
+            handler = LLMHandler(sample_config)
+            handler.provider = mock_provider
+
+            response = await handler.chat("Run echo test")
+
+            assert "test output" in response
+
+    @pytest.mark.asyncio
     async def test_llm_handler_history_integration(self, sample_config, temp_dir):
         """Test LLM handler history integration."""
         sample_config.history_dir = temp_dir / "history"

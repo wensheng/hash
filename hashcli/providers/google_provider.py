@@ -1,5 +1,4 @@
-"""Google AI provider implementation for Hash CLI."""
-
+import json
 from typing import Any, Callable, Dict, List, Optional
 
 from google import genai
@@ -203,51 +202,72 @@ class GoogleProvider(LLMProvider):
             and self.model_name is not None
         )
 
-    def _format_messages_for_provider(self, messages: List[Dict[str, str]]) -> List[types.Content]:
+    def _format_messages_for_provider(self, messages: List[Dict[str, Any]]) -> List[types.Content]:
         """Convert OpenAI format messages to Google AI format."""
         contents = []
+        tool_id_to_name = {}
 
         for message in messages:
-            role = message["role"]
-            content = message["content"]
+            role = message.get("role")
+            content = message.get("content")
+            tool_calls = message.get("tool_calls")
+            tool_call_id = message.get("tool_call_id")
 
             if role == "system":
-                # In strict chat structure, system messages might need to be handled differently
-                # depending on how we want to use them. The new SDK supports system_instruction
-                # in GenerateContentConfig, but here we are mapping a list of messages.
-                # Common pattern: Prepend to first user message or separate.
-                # However, Gemini 1.5 allows 'system' role or system_instruction.
-                # Let's try to map to 'user'/'model' roles as 'system' often clashes in pure chat history
-                # unless using system_instruction.
-                # For compatibility with the previous logic which merged it:
-
-                # The previous implementation prepended "System: " to user messages.
-                # We can replicate a similar behavior or use proper parts.
-
+                # Map system messages to user messages prefixed with "System:"
                 parts = [types.Part(text=f"System: {content}")]
                 contents.append(types.Content(role="user", parts=parts))
-                # Add an acknowledgment to simulate system processing if needed,
-                # or just append to the next user message if we could looking ahead.
-                # To be safe and simple: just send it as a user message.
 
             elif role == "user":
                 parts = [types.Part(text=content)]
                 contents.append(types.Content(role="user", parts=parts))
 
             elif role == "assistant":
-                parts = [types.Part(text=content)]
-                contents.append(types.Content(role="model", parts=parts))
+                parts = []
+                if content:
+                    parts.append(types.Part(text=content))
+                
+                if tool_calls:
+                    for tc in tool_calls:
+                        function = tc.get("function", {})
+                        name = function.get("name")
+                        args_str = function.get("arguments", "{}")
+                        try:
+                            args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                        except json.JSONDecodeError:
+                            args = {}
+                        
+                        tool_id = tc.get("id")
+                        if tool_id:
+                            tool_id_to_name[tool_id] = name
+                        
+                        parts.append(types.Part(
+                            function_call=types.FunctionCall(name=name, args=args)
+                        ))
+                
+                if parts:
+                    contents.append(types.Content(role="model", parts=parts))
 
             elif role == "tool":
-                # Tool results - not fully implemented in this basic migration but
-                # mapping to 'user' with context explanation
-                parts = [types.Part(text=f"Tool Result: {content}")]
-                contents.append(types.Content(role="user", parts=parts))
+                # Look up the function name using the tool_call_id
+                name = tool_id_to_name.get(tool_call_id)
+                if not name:
+                    # Fallback if we can't find the name (shouldn't happen in a valid flow)
+                    parts = [types.Part(text=f"Tool Result (unknown function): {content}")]
+                    contents.append(types.Content(role="user", parts=parts))
+                else:
+                    # Return proper FunctionResponse
+                    # The response content should be a dictionary/struct for best compatibility
+                    response_data = {"content": content}
+                    parts = [types.Part(
+                        function_response=types.FunctionResponse(
+                            name=name,
+                            response=response_data
+                        )
+                    )]
+                    contents.append(types.Content(role="user", parts=parts))
 
-        # Consolidate adjacent messages of the same role if necessary?
-        # The API usually requires alternating User/Model.
-        # If we have multiple User messages (e.g. System + User), we might need to merge them.
-
+        # Merge adjacent messages of the same role if necessary
         merged_contents = []
         if not contents:
             return []

@@ -7,11 +7,8 @@ import subprocess
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
-from rich.console import Console
-
 from .config import HashConfig
-
-console = Console()
+from .ui import console
 
 
 class Command(ABC):

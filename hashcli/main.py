@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import List
 
 import typer
-from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Confirm
@@ -35,6 +34,7 @@ from hashcli.config import (
     validate_api_setup,
 )
 from hashcli.llm_handler import LLMHandler
+from hashcli.ui import console
 
 # Initialize Typer app with rich formatting
 app = typer.Typer(
@@ -45,7 +45,6 @@ app = typer.Typer(
     no_args_is_help=False,  # Allow no args to show usage info
 )
 
-console = Console()
 
 
 def _extract_suggested_command(response_text: str, user_query: Optional[str] = None) -> Optional[str]:
@@ -359,7 +358,7 @@ async def _maybe_execute_suggested_command(
         return
 
     question = f"do you want execute `{suggested_command}`?"
-    if not Confirm.ask(question, default=False):
+    if not Confirm.ask(question, default=False, console=console):
         return
 
     from hashcli.tools.shell import ShellTool
@@ -719,8 +718,12 @@ async def execute_llm_mode(input_text: str, config, quiet: bool = False):
         return
 
     if not quiet:
-        with console.status(f"[dim]Thinking with {config.get_current_model()}...[/dim]"):
+        if config.require_confirmation:
+            console.print(f"[dim]Thinking with {config.get_current_model()}...[/dim]")
             result = await handler.chat(input_text)
+        else:
+            with console.status(f"[dim]Thinking with {config.get_current_model()}...[/dim]"):
+                result = await handler.chat(input_text)
     else:
         result = await handler.chat(input_text)
 
