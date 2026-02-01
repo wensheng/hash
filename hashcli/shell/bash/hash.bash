@@ -27,7 +27,7 @@ hash_magic_execute() {
         # Execute hashcli with the command
         if [[ -n "$cmd" ]]; then
             echo  # New line for output
-            hashcli "$cmd"
+            hashcli "$cmd" < /dev/tty
             local exit_code=$?
             echo  # Another new line
 

@@ -5,7 +5,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import toml
+import tomllib
+
+import tomli_w
 from pydantic import BaseModel, Field, validator
 
 
@@ -31,7 +33,7 @@ class HashConfig(BaseModel):
 
     # LLM Configuration
     llm_provider: LLMProvider = Field(default=LLMProvider.OPENAI, description="Default LLM provider")
-    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
+    openai_api_key: Optional[str] = Field(default='null', description="OpenAI API key")
     openai_base_url: Optional[str] = Field(default=None, description="OpenAI base URL")
     openai_model: str = Field(default="gpt-5-nano", description="Default OpenAI model")
     openai_reasoning_effort: Optional[str] = Field(
@@ -152,8 +154,8 @@ def load_config_file(config_path: Path) -> Dict[str, Any]:
     """Load configuration from a TOML file."""
     try:
         if config_path.exists():
-            with open(config_path, "r", encoding="utf-8") as f:
-                return toml.load(f)
+            with open(config_path, "rb") as f:
+                return tomllib.load(f)
     except Exception:
         # Silent failure for config files - we'll use defaults
         pass
@@ -310,8 +312,8 @@ def save_config(config: HashConfig, config_path: Optional[Path] = None) -> bool:
                 config_dict[key] = str(value)
 
         # Write to file
-        with open(config_path, "w", encoding="utf-8") as f:
-            toml.dump(config_dict, f)
+        with open(config_path, "wb") as f:
+            tomli_w.dump(config_dict, f)
 
         return True
 

@@ -23,7 +23,8 @@ hash-magic-execute() {
         # Extract command after #
         local cmd="${BUFFER#\#}"
         # Execute hashcli with the command
-        hashcli $cmd
+        zle -I
+        hashcli $cmd < /dev/tty
         # Clear buffer
         BUFFER=""
         # Redraw prompt
@@ -54,7 +55,7 @@ function hashcli_intercept --on-event fish_preexec
         # Extract command after #
         set -l hashcli (string sub -s 2 $cmd)
         # Execute hashcli with the command
-        hashcli $hashcli
+        hashcli $hashcli < /dev/tty
         # Clear commandline
         commandline -r ""
         # Cancel execution of the original command

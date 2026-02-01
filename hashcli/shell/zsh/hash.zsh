@@ -19,10 +19,10 @@ hash-magic-execute() {
 
         # Execute hashcli with the command
         if [[ -n "$cmd" ]]; then
-            echo  # New line for output
-            hashcli "$cmd"
+            zle -I
+            hashcli "$cmd" < /dev/tty
             local exit_code=$?
-            echo  # Another new line
+            echo  # Ensure output separation from prompt
 
             # Show exit status if non-zero
             if [[ $exit_code -ne 0 ]]; then

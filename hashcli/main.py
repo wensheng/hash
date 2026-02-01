@@ -417,9 +417,13 @@ For more help: `hashcli --help`
 def version_callback(value: bool):
     """Show version and exit."""
     if value:
-        from . import __version__
+        try:
+            from importlib.metadata import version, PackageNotFoundError
+            package_version = version("hashcli")
+        except (ImportError, PackageNotFoundError):
+            from . import __version__ as package_version
 
-        console.print(f"Hash CLI version {__version__}")
+        console.print(f"Hash CLI version {package_version}")
         raise typer.Exit()
 
 
@@ -540,34 +544,33 @@ def setup_callback(value: bool):
     user_shell_dir = Path.home() / ".hashcli" / "shell"
     install_script = user_shell_dir / shell_name / "install.sh"
 
-    if not install_script.exists():
-        console.print("[dim]Setting up shell integration scripts...[/dim]")
-        try:
-            # Create directory structure
-            user_shell_dir.mkdir(parents=True, exist_ok=True)
+    console.print("[dim]Setting up shell integration scripts...[/dim]")
+    try:
+        # Create directory structure
+        user_shell_dir.mkdir(parents=True, exist_ok=True)
 
-            # Copy shell scripts from package to user directory
-            module_dir = Path(__file__).resolve().parent
-            package_shell_dir = module_dir / "shell"
+        # Copy shell scripts from package to user directory
+        module_dir = Path(__file__).resolve().parent
+        package_shell_dir = module_dir / "shell"
 
-            if package_shell_dir.exists():
-                # Copy the entire shell directory
-                import shutil
+        if package_shell_dir.exists():
+            # Copy the entire shell directory
+            import shutil
 
-                shutil.copytree(package_shell_dir, user_shell_dir, dirs_exist_ok=True)
-                # Make scripts executable
-                for script in user_shell_dir.rglob("*.sh"):
-                    script.chmod(0o755)
-                # Make bash scripts executable
-                for script in user_shell_dir.rglob("*.bash"):
-                    script.chmod(0o755)
-                console.print(f"[dim]Shell scripts copied to {user_shell_dir}[/dim]")
-            else:
-                console.print("[bold red]Unable to locate shell scripts in package.[/bold red]")
-                raise typer.Exit(1)
-        except Exception as e:
-            console.print(f"[bold red]Failed to copy shell scripts:[/bold red] {e}")
+            shutil.copytree(package_shell_dir, user_shell_dir, dirs_exist_ok=True)
+            # Make scripts executable
+            for script in user_shell_dir.rglob("*.sh"):
+                script.chmod(0o755)
+            # Make bash scripts executable
+            for script in user_shell_dir.rglob("*.bash"):
+                script.chmod(0o755)
+            console.print(f"[dim]Shell scripts copied to {user_shell_dir}[/dim]")
+        else:
+            console.print("[bold red]Unable to locate shell scripts in package.[/bold red]")
             raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[bold red]Failed to copy shell scripts:[/bold red] {e}")
+        raise typer.Exit(1)
 
     # Run install script from user directory
     console.print(f"[bold blue]Installing {shell_name} shell integration...[/bold blue]")
