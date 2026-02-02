@@ -22,7 +22,8 @@ hash-magic-execute() {
             zle -I
             hcli "$cmd" < /dev/tty
             local exit_code=$?
-            echo  # Ensure output separation from prompt
+            echo
+            echo  # in zsh last line got cut off, not sure why.
 
             # Show exit status if non-zero
             if [[ $exit_code -ne 0 ]]; then

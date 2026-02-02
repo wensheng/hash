@@ -32,7 +32,7 @@ class HashConfig(BaseModel):
     """Main configuration class with validation and multi-source loading."""
 
     # LLM Configuration
-    llm_provider: LLMProvider = Field(default=LLMProvider.OPENAI, description="Default LLM provider")
+    llm_provider: LLMProvider = Field(default=LLMProvider.GOOGLE, description="Default LLM provider")
     openai_api_key: Optional[str] = Field(default='null', description="OpenAI API key")
     openai_base_url: Optional[str] = Field(default=None, description="OpenAI base URL")
     openai_model: str = Field(default="gpt-5-nano", description="Default OpenAI model")
@@ -46,12 +46,12 @@ class HashConfig(BaseModel):
     anthropic_api_key: Optional[str] = Field(default=None, description="Anthropic API key")
     anthropic_model: str = Field(default="claude-3-sonnet-20240229", description="Default Anthropic model")
     google_api_key: Optional[str] = Field(default=None, description="Google AI API key")
-    google_model: str = Field(default="gemini-pro", description="Default Google model")
+    google_model: str = Field(default="gemini-2.5-flash-lite", description="Default Google model")
     max_response_tokens: int = Field(default=2048, description="Maximum tokens in LLM responses")
 
     # Tool Configuration
     allow_command_execution: bool = Field(default=True, description="Allow LLM to execute shell commands")
-    require_confirmation: bool = Field(default=True, description="Require user confirmation for tool calls")
+    require_confirmation: bool = Field(default=False, description="Require user confirmation for tool calls")
     command_timeout: int = Field(default=30, description="Command execution timeout in seconds")
 
     # History Configuration

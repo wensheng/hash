@@ -1,5 +1,6 @@
 """Anthropic provider implementation for Hash CLI."""
 
+import json
 from typing import Any, Callable, Dict, List, Optional
 
 import anthropic
@@ -110,22 +111,56 @@ class AnthropicProvider(LLMProvider):
             and self.model is not None
         )
 
-    def _format_messages_for_provider(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+    def _format_messages_for_provider(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Convert OpenAI format messages to Anthropic format."""
         system_message = None
         anthropic_messages = []
 
         for message in messages:
             role = message["role"]
-            content = message["content"]
+            content = message.get("content", "")
+            tool_calls = message.get("tool_calls", [])
 
             if role == "system":
                 system_message = content
-            elif role in ["user", "assistant"]:
+            elif role == "assistant":
+                # Handle assistant messages with tool calls
+                if tool_calls:
+                    # Convert tool_calls to Anthropic's tool_use content blocks
+                    content_blocks = []
+                    if content:
+                        # Add text content if present
+                        content_blocks.append({"type": "text", "text": content})
+                    # Add tool_use blocks for each tool call
+                    for tc in tool_calls:
+                        func = tc.get("function", {})
+                        content_blocks.append({
+                            "type": "tool_use",
+                            "id": tc.get("id", tc.get("call_id", "")),
+                            "name": func.get("name", ""),
+                            "input": json.loads(func["arguments"]) if isinstance(func.get("arguments"), str) else func.get("arguments", {}),
+                        })
+                    anthropic_messages.append({"role": role, "content": content_blocks})
+                elif content:
+                    # Regular assistant message with just text
+                    anthropic_messages.append({"role": role, "content": content})
+            elif role == "user":
                 anthropic_messages.append({"role": role, "content": content})
             elif role == "tool":
-                # Convert tool result to user message for Anthropic
-                anthropic_messages.append({"role": "user", "content": f"Tool result: {content}"})
+                # Convert tool result to user message with tool_result content block
+                tool_call_id = message.get("tool_call_id", message.get("call_id", ""))
+                if tool_call_id:
+                    anthropic_messages.append({
+                        "role": "user",
+                        "content": [{
+                            "type": "tool_result",
+                            "tool_use_id": tool_call_id,
+                            "content": content,
+                        }]
+                    })
+                else:
+                    # Fallback for messages without tool_call_id
+                    anthropic_messages.append({"role": "user", "content": f"Tool result: {content}"})
 
         return {"system": system_message, "messages": anthropic_messages}
 

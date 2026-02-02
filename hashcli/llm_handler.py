@@ -306,9 +306,10 @@ You have access to tools that can interact with the system. Use them appropriate
                     })
 
             # Get follow-up response from LLM with tool results
-            tool_call_messages = [{
+            # Note: Some providers (like Anthropic) don't allow empty content in assistant messages
+            # with tool calls. Only add content if it's non-empty.
+            assistant_msg = {
                 "role": "assistant",
-                "content": current_response.content,
                 "tool_calls": [
                     {
                         "id": tc.call_id,
@@ -320,7 +321,11 @@ You have access to tools that can interact with the system. Use them appropriate
                     }
                     for tc in current_response.tool_calls
                 ],
-            }]
+            }
+            if current_response.content:
+                assistant_msg["content"] = current_response.content
+
+            tool_call_messages = [assistant_msg]
             tool_result_messages = [
                 {
                     "role": "tool",
