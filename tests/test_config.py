@@ -26,6 +26,7 @@ class TestHashConfig:
         assert config.openai_model == "gpt-5-nano"
         assert config.allow_command_execution is True
         assert config.require_confirmation is False
+        assert config.allow_shell_operators is False
         assert config.history_enabled is True
         assert config.rich_output is True
         assert config.streaming is False
@@ -87,6 +88,7 @@ class TestConfigurationLoading:
         os.environ["HASHCLI_ANTHROPIC_MODEL"] = "claude-3-opus"
         os.environ["HASHCLI_ALLOW_COMMAND_EXECUTION"] = "false"
         os.environ["HASHCLI_REQUIRE_CONFIRMATION"] = "true"
+        os.environ["HASHCLI_ALLOW_SHELL_OPERATORS"] = "true"
 
         try:
             env_config = load_environment_variables()
@@ -95,6 +97,7 @@ class TestConfigurationLoading:
             assert env_config["anthropic_model"] == "claude-3-opus"
             assert env_config["allow_command_execution"] is False
             assert env_config["require_confirmation"] is True
+            assert env_config["allow_shell_operators"] is True
 
         finally:
             # Clean up
@@ -103,6 +106,7 @@ class TestConfigurationLoading:
                 "HASHCLI_ANTHROPIC_MODEL",
                 "HASHCLI_ALLOW_COMMAND_EXECUTION",
                 "HASHCLI_REQUIRE_CONFIRMATION",
+                "HASHCLI_ALLOW_SHELL_OPERATORS",
             ]:
                 if key in os.environ:
                     del os.environ[key]

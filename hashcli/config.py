@@ -32,8 +32,10 @@ class HashConfig(BaseModel):
     """Main configuration class with validation and multi-source loading."""
 
     # LLM Configuration
-    llm_provider: LLMProvider = Field(default=LLMProvider.GOOGLE, description="Default LLM provider")
-    openai_api_key: Optional[str] = Field(default='null', description="OpenAI API key")
+    llm_provider: LLMProvider = Field(
+        default=LLMProvider.GOOGLE, description="Default LLM provider"
+    )
+    openai_api_key: Optional[str] = Field(default="null", description="OpenAI API key")
     openai_base_url: Optional[str] = Field(default=None, description="OpenAI base URL")
     openai_model: str = Field(default="gpt-5-nano", description="Default OpenAI model")
     openai_reasoning_effort: Optional[str] = Field(
@@ -43,32 +45,60 @@ class HashConfig(BaseModel):
     openai_text_verbosity: Optional[str] = Field(
         default="low", description="Text verbosity for GPT-5 models (low/medium/high)"
     )
-    anthropic_api_key: Optional[str] = Field(default=None, description="Anthropic API key")
-    anthropic_model: str = Field(default="claude-3-sonnet-20240229", description="Default Anthropic model")
+    anthropic_api_key: Optional[str] = Field(
+        default=None, description="Anthropic API key"
+    )
+    anthropic_model: str = Field(
+        default="claude-3-sonnet-20240229", description="Default Anthropic model"
+    )
     google_api_key: Optional[str] = Field(default=None, description="Google AI API key")
-    google_model: str = Field(default="gemini-2.5-flash-lite", description="Default Google model")
-    max_response_tokens: int = Field(default=2048, description="Maximum tokens in LLM responses")
+    google_model: str = Field(
+        default="gemini-2.5-flash-lite", description="Default Google model"
+    )
+    max_response_tokens: int = Field(
+        default=2048, description="Maximum tokens in LLM responses"
+    )
 
     # Tool Configuration
-    allow_command_execution: bool = Field(default=True, description="Allow LLM to execute shell commands")
-    require_confirmation: bool = Field(default=False, description="Require user confirmation for tool calls")
-    command_timeout: int = Field(default=30, description="Command execution timeout in seconds")
+    allow_command_execution: bool = Field(
+        default=True, description="Allow LLM to execute shell commands"
+    )
+    require_confirmation: bool = Field(
+        default=False, description="Require user confirmation for tool calls"
+    )
+    command_timeout: int = Field(
+        default=30, description="Command execution timeout in seconds"
+    )
+    allow_shell_operators: bool = Field(
+        default=True,
+        description="Allow shell operators like | and ; in commands (requires shell execution)",
+    )
 
     # History Configuration
-    history_enabled: bool = Field(default=True, description="Enable conversation history")
-    history_dir: Optional[Path] = Field(default=None, description="History storage directory")
+    history_enabled: bool = Field(
+        default=True, description="Enable conversation history"
+    )
+    history_dir: Optional[Path] = Field(
+        default=None, description="History storage directory"
+    )
     max_history_size: int = Field(default=1000, description="Maximum history entries")
-    history_retention_days: int = Field(default=30, description="History retention period")
+    history_retention_days: int = Field(
+        default=30, description="History retention period"
+    )
 
     # Output Configuration
     rich_output: bool = Field(default=True, description="Enable rich text formatting")
-    streaming: bool = Field(default=False, description="Enable streaming responses from providers")
+    streaming: bool = Field(
+        default=False, description="Enable streaming responses from providers"
+    )
     show_debug: bool = Field(default=False, description="Show debug information")
     log_level: LogLevel = Field(default=LogLevel.INFO, description="Logging level")
 
     # Security Configuration
     sandbox_commands: bool = Field(default=False, description="Run commands in sandbox")
-    allowed_commands: Optional[List[str]] = Field(default=None, description="Whitelist of allowed commands")
+    allowed_commands: Optional[List[str]] = Field(
+        default=None, description="Whitelist of allowed commands"
+    )
     blocked_commands: List[str] = Field(
         default_factory=lambda: ["rm -rf", "sudo", "su"],
         description="Blacklist of blocked commands",
@@ -145,7 +175,11 @@ def get_config_paths() -> List[Path]:
     if os.name == "posix":  # Unix/Linux/macOS
         paths.append(Path("/etc/hashcli/config.toml"))
     elif os.name == "nt":  # Windows
-        paths.append(Path(os.environ.get("ProgramData", "C:/ProgramData")) / "hashcli" / "config.toml")
+        paths.append(
+            Path(os.environ.get("ProgramData", "C:/ProgramData"))
+            / "hashcli"
+            / "config.toml"
+        )
 
     return paths
 
@@ -272,7 +306,9 @@ def load_configuration(
             config.anthropic_api_key = anthropic_key
 
     if "HASHCLI_GOOGLE_API_KEY" not in os.environ:
-        google_key = get_nonempty_env_value("GEMINI_API_KEY") or get_nonempty_env_value("GOOGLE_API_KEY")
+        google_key = get_nonempty_env_value("GEMINI_API_KEY") or get_nonempty_env_value(
+            "GOOGLE_API_KEY"
+        )
         if google_key:
             config.google_api_key = google_key
 

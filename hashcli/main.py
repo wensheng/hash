@@ -48,7 +48,11 @@ app = typer.Typer(
 
 
 
-def _extract_suggested_command(response_text: str, user_query: Optional[str] = None) -> Optional[str]:
+def _extract_suggested_command(
+    response_text: str,
+    user_query: Optional[str] = None,
+    allow_shell_operators: bool = False,
+) -> Optional[str]:
     if not response_text:
         return None
 
@@ -77,7 +81,9 @@ def _extract_suggested_command(response_text: str, user_query: Optional[str] = N
             return False
 
         # Reject commands with shell operators we do not allow to execute.
-        forbidden_operators = ["&&", "||", ";", "|", "`", "$(", ">", "<"]
+        forbidden_operators = ["&&", "||", "`", "$(", ">", "<"]
+        if not allow_shell_operators:
+            forbidden_operators.extend([";", "|"])
         for op in forbidden_operators:
             if op in command:
                 return False
@@ -354,7 +360,11 @@ async def _maybe_execute_suggested_command(
     quiet: bool = False,
     user_query: Optional[str] = None,
 ) -> None:
-    suggested_command = _extract_suggested_command(response_text, user_query=user_query)
+    suggested_command = _extract_suggested_command(
+        response_text,
+        user_query=user_query,
+        allow_shell_operators=config.allow_shell_operators,
+    )
     if not suggested_command:
         return
 
@@ -441,6 +451,9 @@ def show_config_callback(value: bool):
                 f"Command execution: [cyan]{'Enabled' if config.allow_command_execution else 'Disabled'}[/cyan]"
             )
             console.print(f"Confirmation required: [cyan]{'Yes' if config.require_confirmation else 'No'}[/cyan]")
+            console.print(
+                f"Shell operators (|, ;): [cyan]{'Allowed' if config.allow_shell_operators else 'Blocked'}[/cyan]"
+            )
             console.print(f"History: [cyan]{'Enabled' if config.history_enabled else 'Disabled'}[/cyan]")
             if config.history_enabled:
                 console.print(f"History location: [dim]{config.history_dir}[/dim]")

@@ -2,7 +2,7 @@
 
 import shlex
 import subprocess
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from ..config import HashConfig
 from .base import Tool
@@ -36,22 +36,35 @@ class ShellTool(Tool):
             return security_check
 
         try:
-            # Parse command safely
-            if isinstance(command, str):
-                # Use shlex to safely parse the command
-                cmd_args = shlex.split(command)
-            else:
-                cmd_args = command
+            use_shell = self._should_use_shell(command, config)
 
-            # Execute command with security restrictions
-            result = subprocess.run(
-                cmd_args,
-                capture_output=True,
-                text=True,
-                timeout=config.command_timeout,
-                shell=False,  # Never use shell=True for security
-                cwd=None,  # Use current directory
-            )
+            if use_shell:
+                # Execute via shell only when explicitly enabled for operators.
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=config.command_timeout,
+                    shell=True,
+                    cwd=None,
+                )
+            else:
+                # Parse command safely
+                if isinstance(command, str):
+                    # Use shlex to safely parse the command
+                    cmd_args = shlex.split(command)
+                else:
+                    cmd_args = command
+
+                # Execute command with security restrictions
+                result = subprocess.run(
+                    cmd_args,
+                    capture_output=True,
+                    text=True,
+                    timeout=config.command_timeout,
+                    shell=False,  # Never use shell=True for security
+                    cwd=None,  # Use current directory
+                )
 
             # Format output
             output = ""
@@ -78,7 +91,14 @@ class ShellTool(Tool):
         except subprocess.CalledProcessError as e:
             return f"Command failed with exit code {e.returncode}: {e}"
         except FileNotFoundError:
-            return f"Command not found: {cmd_args[0] if cmd_args else 'unknown'}"
+            if isinstance(command, str):
+                try:
+                    cmd_preview = shlex.split(command)
+                except ValueError:
+                    cmd_preview = []
+            else:
+                cmd_preview = command
+            return f"Command not found: {cmd_preview[0] if cmd_preview else 'unknown'}"
         except Exception as e:
             return f"Error executing command: {e}"
 
@@ -93,10 +113,12 @@ class ShellTool(Tool):
 
         # Check against allowed commands if whitelist is configured
         if config.allowed_commands:
-            # Extract base command
-            cmd_parts = shlex.split(command) if isinstance(command, str) else command
-            if cmd_parts:
-                base_cmd = cmd_parts[0]
+            if isinstance(command, str):
+                base_commands = self._extract_base_commands(command)
+            else:
+                base_commands = command[:1] if command else []
+
+            for base_cmd in base_commands:
                 if base_cmd not in config.allowed_commands:
                     return f"Command not in allowed list: {base_cmd}"
 
@@ -106,8 +128,6 @@ class ShellTool(Tool):
             "`",
             "&&",
             "||",
-            ";",
-            "|",  # Command injection patterns
             "rm -rf /",
             "sudo rm",
             "chmod 777",  # Dangerous file operations
@@ -115,11 +135,78 @@ class ShellTool(Tool):
             "wget | sh",  # Dangerous download-execute patterns
         ]
 
+        if not config.allow_shell_operators:
+            dangerous_patterns.extend([";", "|"])  # Command injection patterns
+
         for pattern in dangerous_patterns:
             if pattern in command_lower:
                 return f"Potentially dangerous command pattern detected: {pattern}"
 
         return ""  # Command is valid
+
+    def _should_use_shell(self, command: Any, config: HashConfig) -> bool:
+        if not config.allow_shell_operators:
+            return False
+        if not isinstance(command, str):
+            return False
+        return "|" in command or ";" in command
+
+    def _extract_base_commands(self, command: str) -> List[str]:
+        """Extract base commands from a command string, honoring pipe/semicolon separators."""
+        segments = self._split_command_chain(command)
+        base_commands = []
+        for segment in segments:
+            try:
+                parts = shlex.split(segment)
+            except ValueError:
+                continue
+            if parts:
+                base_commands.append(parts[0])
+        return base_commands
+
+    def _split_command_chain(self, command: str) -> List[str]:
+        """Split a command string on unquoted | and ; characters."""
+        segments = []
+        current = []
+        in_single = False
+        in_double = False
+        escaped = False
+
+        for ch in command:
+            if escaped:
+                current.append(ch)
+                escaped = False
+                continue
+
+            if ch == "\\" and not in_single:
+                escaped = True
+                current.append(ch)
+                continue
+
+            if ch == "'" and not in_double:
+                in_single = not in_single
+                current.append(ch)
+                continue
+
+            if ch == '"' and not in_single:
+                in_double = not in_double
+                current.append(ch)
+                continue
+
+            if not in_single and not in_double and ch in ("|", ";"):
+                segment = "".join(current).strip()
+                if segment:
+                    segments.append(segment)
+                current = []
+                continue
+
+            current.append(ch)
+
+        segment = "".join(current).strip()
+        if segment:
+            segments.append(segment)
+
+        return segments
 
     def requires_confirmation(self) -> bool:
         """Shell commands always require confirmation for safety."""

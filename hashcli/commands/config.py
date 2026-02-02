@@ -42,6 +42,7 @@ class ConfigCommand(Command):
         output += f"  Command execution: {'Enabled' if config.allow_command_execution else 'Disabled'}\n"
         output += f"  Confirmation required: {'Yes' if config.require_confirmation else 'No'}\n"
         output += f"  Command timeout: {config.command_timeout}s\n"
+        output += f"  Shell operators (|, ;): {'Allowed' if config.allow_shell_operators else 'Blocked'}\n"
         output += f"  Sandbox commands: {'Yes' if config.sandbox_commands else 'No'}\n\n"
 
         # History Configuration

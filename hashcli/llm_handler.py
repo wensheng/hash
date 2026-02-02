@@ -141,6 +141,7 @@ Guidelines:
 - Prioritize security and best practices
 - Indicate when you're unsure and suggest verification steps
 - **Prefer simple, single-line commands** (e.g., `seq`, `grep`, `find`) over complex shell loops or scripts. Specifically, use `seq` for number sequences.
+- Shell operators `|` and `;` are {'allowed' if self.config.allow_shell_operators else 'disabled'}; only use them when allowed.
 
 Tool usage policy:
 - **Action Requests:** If the user asks you to perform an action or retrieve information directly (e.g., "show me disk usage", "list files", "read README.md", "check time"), **CALL THE TOOL DIRECTLY**. Do not ask for confirmation in text; the system handles that.
