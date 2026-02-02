@@ -22,10 +22,10 @@ class TestHashConfig:
         """Test default configuration values."""
         config = HashConfig()
 
-        assert config.llm_provider == LLMProvider.OPENAI
+        assert config.llm_provider == LLMProvider.GOOGLE
         assert config.openai_model == "gpt-5-nano"
         assert config.allow_command_execution is True
-        assert config.require_confirmation is True
+        assert config.require_confirmation is False
         assert config.history_enabled is True
         assert config.rich_output is True
         assert config.streaming is False
