@@ -42,6 +42,11 @@ class LLMProvider(ABC):
         """Validate that the provider is properly configured."""
         pass
 
+    @abstractmethod
+    def get_system_prompt(self) -> str:
+        """Get the system prompt for the provider."""
+        pass
+
     def _extract_tool_calls(self, response_data: Any) -> List[ToolCall]:
         """Extract tool calls from provider response. Override as needed."""
         return []

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List
 
 import typer
+from rich import box
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
@@ -45,7 +46,6 @@ app = typer.Typer(
     rich_markup_mode="rich",
     no_args_is_help=False,  # Allow no args to show usage info
 )
-
 
 
 def _extract_suggested_command(
@@ -429,6 +429,7 @@ def version_callback(value: bool):
     if value:
         try:
             from importlib.metadata import version, PackageNotFoundError
+
             package_version = version("hashcli")
         except (ImportError, PackageNotFoundError):
             from . import __version__ as package_version
@@ -755,7 +756,14 @@ def display_result(result: str, config, quiet: bool = False):
         # Rich formatted output
         renderable = Text(result, overflow="fold")
         console.print()
-        console.print(Panel(renderable, title="[bold green]Result[/bold green]", border_style="green"))
+        console.print(
+            Panel(
+                renderable,
+                title="[bold green]Result[/bold green]",
+                border_style="green",
+                box=box.HORIZONTALS,
+            )
+        )
     else:
         # Plain text output
         console.print("\n[bold green]Result:[/bold green]")

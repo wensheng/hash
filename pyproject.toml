@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hashcli"
-version = "0.3.2"
+version = "0.3.3"
 description = "Hash - Intelligent CLI system with dual-mode functionality (LLM chat and command proxy)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,6 +36,7 @@ dependencies = [
   "termcolor (>=3.3.0,<4.0.0)",
   "colorama (>=0.4.6,<0.5.0) ; sys_platform == \"win32\"",
   "shtab (>=1.8.0,<2.0.0)",
+  "ddgs (>=9.10.0,<10.0.0)",
 ]
 
 [project.optional-dependencies]
