@@ -26,7 +26,7 @@ class TestHashConfig:
         assert config.openai_model == "gpt-5-nano"
         assert config.allow_command_execution is True
         assert config.require_confirmation is False
-        assert config.allow_shell_operators is False
+        assert config.allow_shell_operators is True
         assert config.history_enabled is True
         assert config.rich_output is True
         assert config.streaming is False
@@ -180,7 +180,7 @@ class TestConfigurationLoading:
 
         config_path = temp_dir / "config.toml"
         config_path.write_text(
-            '\n'.join(
+            "\n".join(
                 [
                     'openai_api_key = "file-openai-key"',
                     'anthropic_api_key = "file-anthropic-key"',
