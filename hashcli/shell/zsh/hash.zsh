@@ -1,39 +1,34 @@
 #!/usr/bin/env zsh
 # Hash CLI Integration for zsh
-# This script enables the # prefix trigger for Hash commands
+# This script enables interception for any command line containing #
 
 # Create hash-magic-execute widget
 hash-magic-execute() {
-    # Check if buffer starts with ##
-    if [[ "$BUFFER" =~ ^[[:space:]]*## ]]; then
-        # Treat as comment / normal shell behavior
-        zle .accept-line
-    # Check if buffer starts with #
-    elif [[ "$BUFFER" =~ ^[[:space:]]*# ]]; then
+    # Ignore lines containing '##' by executing only the part before it.
+    if [[ "$BUFFER" == *"##"* ]]; then
+        local command_before_comment="${BUFFER%%##*}"
+        if [[ -z "${command_before_comment//[[:space:]]/}" ]]; then
+            BUFFER=""
+            zle reset-prompt
+        else
+            BUFFER="$command_before_comment"
+            zle .accept-line
+        fi
+    # Intercept command line containing '#'
+    elif [[ "$BUFFER" == *"#"* ]]; then
         # Save the original buffer for history
         local original_buffer="$BUFFER"
 
-        # Extract command after #
-        local cmd="${BUFFER#*#}"
-        cmd="${cmd#"${cmd%%[![:space:]]*}"}"  # Trim leading whitespace
+        # Execute hashcli with the full original command line
+        zle -I
+        hcli "$original_buffer" < /dev/tty
+        local exit_code=$?
+        echo
+        echo  # in zsh last line got cut off, not sure why.
 
-        # Execute hashcli with the command
-        if [[ -n "$cmd" ]]; then
-            zle -I
-            hcli "$cmd" < /dev/tty
-            local exit_code=$?
-            echo
-            echo  # in zsh last line got cut off, not sure why.
-
-            # Show exit status if non-zero
-            if [[ $exit_code -ne 0 ]]; then
-                echo "Exit code: $exit_code"
-            fi
-        else
-            # Empty command after #, just show help
-            echo  # New line
-            hcli "/help"
-            echo  # Another new line
+        # Show exit status if non-zero
+        if [[ $exit_code -ne 0 ]]; then
+            echo "Exit code: $exit_code"
         fi
 
         # Add to shell history

@@ -69,8 +69,18 @@ fi
 echo "✅ zsh syntax OK"
 echo ""
 
-# Test 4: Check install script functionality
-echo "Test 4: Testing install script..."
+# Test 4: Guard against undefined command variable usage
+echo "Test 4: Checking for undefined command branch..."
+if rg -n '\$cmd\b' "$SCRIPT_DIR/hash.zsh" >/dev/null 2>&1; then
+    echo "✗ hash.zsh references undefined \$cmd variable"
+    exit 1
+fi
+echo "✓ No undefined \$cmd usage found"
+echo "✅ Command branch guard OK"
+echo ""
+
+# Test 5: Check install script functionality
+echo "Test 5: Testing install script..."
 if "$SCRIPT_DIR/install.sh" help >/dev/null 2>&1; then
     echo "✓ install.sh help command works"
 else
@@ -80,8 +90,8 @@ fi
 echo "✅ Install script basic functionality OK"
 echo ""
 
-# Test 5: Check hashcli availability
-echo "Test 5: Checking hashcli availability..."
+# Test 6: Check hashcli availability
+echo "Test 6: Checking hashcli availability..."
 if command -v hashcli >/dev/null 2>&1; then
     echo "✓ hashcli is available in PATH"
     

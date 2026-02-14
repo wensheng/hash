@@ -19,12 +19,20 @@ autoload -Uz bashcompinit && bashcompinit
 
 # Hashcmd zsh integration
 hash-magic-execute() {
-    if [[ $BUFFER == \#* ]]; then
-        # Extract command after #
-        local cmd="${BUFFER#\#}"
-        # Execute hashcli with the command
+    if [[ "$BUFFER" == *"##"* ]]; then
+        # Ignore everything after ## so comments never trigger hcli
+        local command_before_comment="${BUFFER%%##*}"
+        if [[ -z "${command_before_comment//[[:space:]]/}" ]]; then
+            BUFFER=""
+            zle reset-prompt
+        else
+            BUFFER="$command_before_comment"
+            zle .accept-line
+        fi
+    elif [[ "$BUFFER" == *"#"* ]]; then
+        # Execute hashcli with the full command line
         zle -I
-        hcli $cmd < /dev/tty
+        hcli "$BUFFER" < /dev/tty
         # Clear buffer
         BUFFER=""
         # Redraw prompt
@@ -51,11 +59,12 @@ cat > ~/.config/fish/config.fish << 'EOF'
 # Hashcmd fish integration
 function hashcli_intercept --on-event fish_preexec
     set -l cmd (commandline)
-    if string match -q '#*' $cmd
-        # Extract command after #
-        set -l hashcli (string sub -s 2 $cmd)
-        # Execute hashcli with the command
-        hcli $hashcli < /dev/tty
+    if string match -q '*##*' $cmd
+        # Let shell handle comments normally
+        return 0
+    else if string match -q '*#*' $cmd
+        # Execute hashcli with the full command line
+        hcli "$cmd" < /dev/tty
         # Clear commandline
         commandline -r ""
         # Cancel execution of the original command

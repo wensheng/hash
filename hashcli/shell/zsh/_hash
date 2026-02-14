@@ -47,14 +47,6 @@ _hash_command_proxy_mode() {
     fi
     
     case "$proxy_cmd" in
-        ls)
-            # File and directory completions for ls command
-            _arguments \
-                '*:files and directories:_files' \
-                '(-l --long)'{-l,--long}'[use long listing format]' \
-                '(-a --all)'{-a,--all}'[show hidden files]' \
-                '(-h --human-readable)'{-h,--human-readable}'[human readable sizes]'
-            ;;
         model)
             # Available LLM models
             local -a models
@@ -107,6 +99,15 @@ _hash_command_proxy_mode() {
             # Help topics
             local -a help_topics
             help_topics=(
+                'clean:Clear conversation history'
+                'model:Switch LLM model or provider'
+                'fix:Get coding assistance'
+                'tldr:Show quick command examples'
+                'help:Show available commands'
+                'config:Show or update configuration'
+                'history:Manage conversation history'
+                'exit:Exit the application'
+                'quit:Exit the application'
                 'commands:Available commands'
                 'config:Configuration help'
                 'models:Available models'
@@ -114,8 +115,19 @@ _hash_command_proxy_mode() {
             )
             _describe 'help topics' help_topics
             ;;
+        history)
+            local -a history_options
+            history_options=(
+                'list:List recent conversations'
+                'show:Show a conversation by ID'
+                'clear:Clear all history'
+            )
+            _describe 'history options' history_options
+            ;;
+        exit|quit)
+            ;;
         *)
-            # For unknown proxy commands, provide generic command completions
+            # Unknown slash command: suggest built-in slash commands
             if [[ -z "$proxy_cmd" ]]; then
                 # List available slash commands
                 local -a slash_commands
@@ -126,11 +138,25 @@ _hash_command_proxy_mode() {
                     'tldr:Show quick command examples'
                     'help:Show available commands'
                     'config:Manage configuration'
+                    'history:Manage conversation history'
+                    'exit:Exit the application'
+                    'quit:Exit the application'
                 )
                 _describe 'available commands' slash_commands -p '/'
             else
-                # Try system command completion
-                _command_names -e
+                local -a slash_commands
+                slash_commands=(
+                    'clean:Clear conversation history'
+                    'model:Switch LLM model'
+                    'fix:Get coding assistance'
+                    'tldr:Show quick command examples'
+                    'help:Show available commands'
+                    'config:Manage configuration'
+                    'history:Manage conversation history'
+                    'exit:Exit the application'
+                    'quit:Exit the application'
+                )
+                _describe 'available commands' slash_commands -p '/'
             fi
             ;;
     esac

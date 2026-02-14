@@ -20,7 +20,7 @@ $HashConfig = @{
     EnableLogging = $false
 }
 
-# Function to handle # prefix detection and execution
+# Function to handle detection and execution for lines containing #
 function Invoke-HashCommand {
     [CmdletBinding()]
     param(
@@ -29,9 +29,14 @@ function Invoke-HashCommand {
         [int]$CursorPosition
     )
 
-    # Check if buffer starts with #
-    if ($Buffer -match '^\s*#\s*(.*)$') {
-        $command = $Matches[1].Trim()
+    # Ignore lines containing '##' and let shell handle comments normally.
+    if ($Buffer -match '##') {
+        return $false
+    }
+
+    # Intercept command line containing '#'
+    if ($Buffer -match '#') {
+        $command = $Buffer
 
         if ($command) {
             try {

@@ -182,26 +182,82 @@ class TestLLMIntegration:
         # Should have system message + previous conversation
         assert len(messages) >= 3  # system + user1 + assistant1 + user2
 
+    @pytest.mark.asyncio
+    async def test_llm_handler_force_confirmation_true_overrides_config(self, sample_config, temp_dir):
+        """How-to mode can force confirmation even when config disables it."""
+        from hashcli.llm_handler import ToolCall
+
+        sample_config.history_dir = temp_dir / "history"
+        sample_config.require_confirmation = False
+
+        mock_provider = MagicMock()
+        mock_provider.generate_response = AsyncMock()
+
+        tool_call = ToolCall(
+            name="execute_shell_command",
+            arguments={"command": "find . -name __pycache__", "description": "Find pycache dirs"},
+        )
+        initial_response = LLMResponse(content="Running command", tool_calls=[tool_call], model="test-model")
+        final_response = LLMResponse(content="User declined to execute this tool call.", tool_calls=[], model="test")
+        mock_provider.generate_response.side_effect = [initial_response, final_response]
+
+        with patch("hashcli.tools.get_tool_executor") as mock_get_tool:
+            mock_tool = MagicMock()
+            mock_tool.execute = AsyncMock(return_value="should-not-run")
+            mock_tool.requires_confirmation.return_value = True
+            mock_get_tool.return_value = mock_tool
+
+            handler = LLMHandler(sample_config)
+            handler.provider = mock_provider
+            with patch.object(handler, "_get_user_confirmation", return_value=False) as mock_confirm:
+                await handler.chat("how to find __pycache__", force_tool_confirmation=True)
+
+                mock_confirm.assert_called_once()
+                mock_tool.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_llm_handler_force_confirmation_false_overrides_config(self, sample_config, temp_dir):
+        """Command-hint mode can bypass config-level confirmation."""
+        from hashcli.llm_handler import ToolCall
+
+        sample_config.history_dir = temp_dir / "history"
+        sample_config.require_confirmation = True
+
+        mock_provider = MagicMock()
+        mock_provider.generate_response = AsyncMock()
+
+        tool_call = ToolCall(
+            name="execute_shell_command",
+            arguments={"command": "find . -name __pycache__", "description": "Find pycache dirs"},
+        )
+        initial_response = LLMResponse(content="Running command", tool_calls=[tool_call], model="test-model")
+        final_response = LLMResponse(content="Done", tool_calls=[], model="test")
+        mock_provider.generate_response.side_effect = [initial_response, final_response]
+
+        with patch("hashcli.tools.get_tool_executor") as mock_get_tool:
+            mock_tool = MagicMock()
+            mock_tool.execute = AsyncMock(return_value="ok")
+            mock_tool.requires_confirmation.return_value = True
+            mock_get_tool.return_value = mock_tool
+
+            handler = LLMHandler(sample_config)
+            handler.provider = mock_provider
+            with patch.object(handler, "_get_user_confirmation") as mock_confirm:
+                await handler.chat("find # all __pycache__", force_tool_confirmation=False)
+
+                mock_confirm.assert_not_called()
+                mock_tool.execute.assert_awaited_once()
+
 
 class TestCommandIntegration:
     """Test command integration and cross-platform compatibility."""
 
-    def test_system_command_integration(self, sample_config):
-        """Test system command integration."""
+    def test_unknown_slash_command_rejected(self, sample_config):
+        """Unknown slash commands should not proxy to system commands."""
         proxy = CommandProxy(sample_config)
 
-        # Mock subprocess for cross-platform testing
-        with patch("hashcli.command_proxy.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                stdout="file1.txt\\nfile2.py\\nsubdir/\\n", stderr="", returncode=0
-            )
-
-            result = proxy.execute("/ls")
-
-            assert mock_run.called
-            assert (
-                "file1.txt" in result or "file2.py" in result or result
-            )  # Some content
+        result = proxy.execute("/ls")
+        assert "Unknown command: /ls" in result
 
     def test_help_command_integration(self, sample_config):
         """Test help command integration."""
@@ -258,24 +314,18 @@ class TestErrorHandling:
         assert "LLM Error" in response
         assert "API Error" in response
 
-    def test_command_execution_error_handling(self, sample_config):
-        """Test command execution error handling."""
+    def test_unknown_command_error_handling(self, sample_config):
+        """Unknown slash commands return a consistent error message."""
         proxy = CommandProxy(sample_config)
-
-        # Mock subprocess that fails
-        with patch("hashcli.command_proxy.subprocess.run") as mock_run:
-            mock_run.side_effect = FileNotFoundError("Command not found")
-
-            result = proxy.execute("/ls")
-
-            assert "Command not found" in result
+        result = proxy.execute("/ls")
+        assert "Unknown command: /ls" in result
 
     def test_invalid_command_arguments(self, sample_config):
         """Test handling of invalid command arguments."""
         proxy = CommandProxy(sample_config)
 
         # Test with malformed command line
-        result = proxy.execute('/ls "unclosed quote')
+        result = proxy.execute('/help "unclosed quote')
 
         # Should handle parsing error gracefully
         assert "Error parsing command" in result or result  # Some error message

@@ -1,15 +1,15 @@
 # Hash integration for fish shell
-function hash_magic_execute --description "Execute hash commands with # prefix"
+function hash_magic_execute --description "Execute hash commands for lines containing #"
     set -l current_buffer (commandline)
 
-    # Check if buffer starts with #
-    if string match -q '#*' "$current_buffer"
-        # Extract command after #
-        set -l cmd (string replace -r '^#\s*' '' "$current_buffer")
-
-        if test -n "$cmd"
+    # Ignore lines containing '##' and let shell handle comments normally.
+    if string match -q '*##*' "$current_buffer"
+        commandline -f execute
+    # Intercept command line containing '#'
+    else if string match -q '*#*' "$current_buffer"
+        if test -n "$current_buffer"
             echo  # New line
-            hcli $cmd < /dev/tty
+            hcli "$current_buffer" < /dev/tty
             echo  # Another new line
         end
 

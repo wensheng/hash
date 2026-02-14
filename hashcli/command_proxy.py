@@ -1,9 +1,6 @@
 """Command proxy system for handling slash-prefixed commands."""
 
-import platform
 import shlex
-import shutil
-import subprocess
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
@@ -35,7 +32,6 @@ class CommandProxy:
     def __init__(self, config: HashConfig):
         self.config = config
         self.commands = self._register_commands()
-        self.system_commands = self._get_system_commands()
 
     def execute(self, command_line: str) -> str:
         """Execute a slash command."""
@@ -56,10 +52,6 @@ class CommandProxy:
 
         cmd = parts[0]
         args = parts[1:] if len(parts) > 1 else []
-
-        # Prefer system commands when detected
-        if self._is_system_command(cmd):
-            return self._execute_system_command([cmd] + args)
 
         # Check if command exists
         if cmd not in self.commands:
@@ -106,131 +98,6 @@ class CommandProxy:
             "quit": ExitCommand(),
         }
 
-    def _get_system_commands(self) -> set[str]:
-        """Get system command names that should be executed via the shell."""
-        if platform.system() == "Windows":
-            return {
-                "dir",
-                "cls",
-                "find",
-                "findstr",
-                "type",
-                "where",
-                "ipconfig",
-                "ping",
-                "whoami",
-            }
-
-        return {
-            "ls",
-            "clear",
-            "grep",
-            "find",
-            "cat",
-            "head",
-            "tail",
-            "pwd",
-            "whoami",
-            "date",
-            "df",
-            "du",
-            "ps",
-            "top",
-            "sed",
-            "awk",
-            "sort",
-            "uniq",
-            "wc",
-            "cut",
-            "xargs",
-            "tar",
-            "gzip",
-            "gunzip",
-            "zip",
-            "unzip",
-            "curl",
-            "wget",
-            "ping",
-            "traceroute",
-            "which",
-            "whereis",
-            "uname",
-            "id",
-            "env",
-            "printenv",
-        }
-
-    def _is_system_command(self, cmd: str) -> bool:
-        """Check if a slash command should be routed to the system shell."""
-        cmd_lower = cmd.lower()
-        if cmd_lower in self.system_commands:
-            return True
-        if cmd in self.commands:
-            return False
-        return shutil.which(cmd) is not None
-
-    def _execute_system_command(self, cmd_args: List[str]) -> str:
-        """Execute a system command with security checks."""
-        cmd_str = " ".join(cmd_args)
-        for blocked in self.config.blocked_commands:
-            if blocked.lower() in cmd_str.lower():
-                return f"Blocked command detected: {blocked}"
-
-        if self.config.allowed_commands:
-            base_cmd = cmd_args[0] if cmd_args else ""
-            if base_cmd not in self.config.allowed_commands:
-                return f"Command not in allowed list: {base_cmd}"
-
-        try:
-            if platform.system() == "Windows" and cmd_args:
-                cmd_lower = cmd_args[0].lower()
-                if cmd_lower in self.system_commands:
-                    result = subprocess.run(
-                        ["cmd", "/c"] + cmd_args,
-                        capture_output=True,
-                        text=True,
-                        timeout=self.config.command_timeout,
-                        shell=False,
-                    )
-                else:
-                    result = subprocess.run(
-                        cmd_args,
-                        capture_output=True,
-                        text=True,
-                        timeout=self.config.command_timeout,
-                        shell=False,
-                    )
-            else:
-                result = subprocess.run(
-                    cmd_args,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.config.command_timeout,
-                    shell=False,
-                )
-
-            output = ""
-            if result.stdout:
-                output += result.stdout
-            if result.stderr:
-                if output:
-                    output += "\n"
-                output += f"stderr: {result.stderr}"
-
-            if result.returncode != 0 and not output:
-                output = f"Command failed with exit code {result.returncode}"
-
-            return output.strip()
-
-        except subprocess.TimeoutExpired:
-            return f"Command timed out after {self.config.command_timeout} seconds"
-        except subprocess.CalledProcessError as e:
-            return f"Command failed: {e}"
-        except FileNotFoundError:
-            return f"Command not found: {cmd_args[0] if cmd_args else 'unknown'}"
-        except Exception as e:
-            return f"Execution error: {e}"
-
     def get_available_commands(self) -> List[str]:
         """Get list of available command names."""
         return sorted(self.commands.keys())
@@ -240,58 +107,6 @@ class CommandProxy:
         if command in self.commands:
             return self.commands[command].get_help()
         return None
-
-
-class SystemCommand(Command):
-    """Base class for system commands that execute shell operations."""
-
-    def execute_system_command(self, cmd_args: List[str], config: HashConfig) -> str:
-        """Execute a system command with security checks."""
-
-        # Security check: validate command against blocked list
-        cmd_str = " ".join(cmd_args)
-        for blocked in config.blocked_commands:
-            if blocked.lower() in cmd_str.lower():
-                return f"Blocked command detected: {blocked}"
-
-        # Security check: validate against allowed list if configured
-        if config.allowed_commands:
-            base_cmd = cmd_args[0] if cmd_args else ""
-            if base_cmd not in config.allowed_commands:
-                return f"Command not in allowed list: {base_cmd}"
-
-        try:
-            # Execute command with timeout
-            result = subprocess.run(
-                cmd_args,
-                capture_output=True,
-                text=True,
-                timeout=config.command_timeout,
-                shell=False,  # Never use shell=True for security
-            )
-
-            # Format output
-            output = ""
-            if result.stdout:
-                output += result.stdout
-            if result.stderr:
-                if output:
-                    output += "\n"
-                output += f"stderr: {result.stderr}"
-
-            if result.returncode != 0 and not output:
-                output = f"Command failed with exit code {result.returncode}"
-
-            return output.strip()
-
-        except subprocess.TimeoutExpired:
-            return f"Command timed out after {config.command_timeout} seconds"
-        except subprocess.CalledProcessError as e:
-            return f"Command failed: {e}"
-        except FileNotFoundError:
-            return f"Command not found: {cmd_args[0] if cmd_args else 'unknown'}"
-        except Exception as e:
-            return f"Execution error: {e}"
 
 
 # History command for conversation history management

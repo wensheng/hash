@@ -51,7 +51,12 @@ class LLMHandler:
         self.current_session_id = None
         self.last_tool_calls_executed = False
 
-    async def chat(self, message: str, stream_handler: Optional[Callable[[str], None]] = None) -> str:
+    async def chat(
+        self,
+        message: str,
+        stream_handler: Optional[Callable[[str], None]] = None,
+        force_tool_confirmation: Optional[bool] = None,
+    ) -> str:
         """Main chat interface that handles the complete conversation flow."""
         try:
             self.last_tool_calls_executed = False
@@ -76,7 +81,12 @@ class LLMHandler:
             # Handle tool calls if present
             if response.has_tool_calls():
                 self.last_tool_calls_executed = True
-                response = await self._handle_tool_calls(response, context_messages, stream_handler)
+                response = await self._handle_tool_calls(
+                    response,
+                    context_messages,
+                    stream_handler,
+                    force_tool_confirmation=force_tool_confirmation,
+                )
 
             # Add assistant response to history
             if self.history:
@@ -247,6 +257,7 @@ class LLMHandler:
         response: LLMResponse,
         context_messages: List[Dict[str, str]],
         stream_handler: Optional[Callable[[str], None]] = None,
+        force_tool_confirmation: Optional[bool] = None,
     ) -> LLMResponse:
         """Handle tool calls from the LLM response."""
         from .tools import get_tool_executor
@@ -272,7 +283,11 @@ class LLMHandler:
                     continue
 
                 # Get user confirmation if required
-                if self.config.require_confirmation and executor.requires_confirmation():
+                effective_confirmation = self.config.require_confirmation
+                if force_tool_confirmation is not None:
+                    effective_confirmation = force_tool_confirmation
+
+                if effective_confirmation and executor.requires_confirmation():
                     if not self._get_user_confirmation(tool_call):
                         tool_results.append({
                             "tool_call_id": tool_call.call_id,

@@ -181,7 +181,7 @@ show_usage() {
     echo ""
     echo "Examples:"
     echo "  # how do I list files recursively?"
-    echo "  # /ls -la"
+    echo "  # /help"
     echo "  # /model gpt-4"
 }
 

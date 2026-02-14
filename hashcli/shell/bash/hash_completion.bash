@@ -29,6 +29,7 @@ _hash_completion() {
 _hash_command_proxy_mode() {
     local proxy_content="$1"
     local cur="${COMP_WORDS[COMP_CWORD]}"
+    local slash_commands="clean model fix help config tldr history exit quit"
 
     # Extract the command name (after /)
     local proxy_cmd
@@ -36,15 +37,6 @@ _hash_command_proxy_mode() {
     proxy_cmd="${proxy_cmd%% *}"
 
     case "$proxy_cmd" in
-        ls)
-            # File and directory completions for ls command
-            local opts="-l -a -h --long --all --human-readable"
-            if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
-            else
-                COMPREPLY=( $(compgen -f -- "$cur") )
-            fi
-            ;;
         model)
             # Available LLM models
             local models="gpt-4 gpt-4-turbo gpt-3.5-turbo claude-3-opus claude-3-sonnet claude-3-haiku gemini-pro gemini-1.5-pro"
@@ -71,17 +63,24 @@ _hash_command_proxy_mode() {
             ;;
         help)
             # Help topics
-            local help_topics="commands config models tools"
+            local help_topics="$slash_commands commands config models tools"
             COMPREPLY=( $(compgen -W "$help_topics" -- "$cur") )
+            ;;
+        history)
+            # History options
+            local history_options="list show clear"
+            COMPREPLY=( $(compgen -W "$history_options" -- "$cur") )
+            ;;
+        exit|quit)
+            COMPREPLY=()
             ;;
         "")
             # List available slash commands
-            local slash_commands="clean model fix help config tldr"
             COMPREPLY=( $(compgen -W "$slash_commands" -P "/" -- "${cur#/}") )
             ;;
         *)
-            # Try system command completion
-            COMPREPLY=( $(compgen -c -- "$cur") )
+            # Unknown slash command: suggest built-in slash commands
+            COMPREPLY=( $(compgen -W "$slash_commands" -P "/" -- "${cur#/}") )
             ;;
     esac
 }

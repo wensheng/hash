@@ -15,6 +15,7 @@ import os
 import re
 import shlex
 import subprocess
+from dataclasses import dataclass
 from typing import Optional
 from pathlib import Path
 from typing import List
@@ -46,6 +47,173 @@ app = typer.Typer(
     rich_markup_mode="rich",
     no_args_is_help=False,  # Allow no args to show usage info
 )
+
+
+@dataclass(frozen=True)
+class QueryExecutionPolicy:
+    force_tool_confirmation: Optional[bool]
+    suggested_command_confirmation: bool
+    force_command_oriented: bool = False
+
+
+def _normalize_shell_input(input_text: str) -> str:
+    """Normalize shell integration input that uses # markers."""
+    if not input_text:
+        return input_text
+
+    leading_hash_match = re.match(r"^\s*#(.*)$", input_text, re.DOTALL)
+    if leading_hash_match:
+        return leading_hash_match.group(1).lstrip()
+
+    hash_index = input_text.find("#")
+    if hash_index <= 0:
+        return input_text
+
+    command_hint = input_text[:hash_index].strip()
+    user_intent = input_text[hash_index + 1 :].strip()
+    if not command_hint or not user_intent:
+        return input_text
+
+    return (
+        f"Task: {user_intent}. "
+        f"Use `{command_hint}` as command hint. "
+        "Execute a single concrete shell command now and return the command result."
+    )
+
+
+def _is_how_to_query(input_text: str) -> bool:
+    if not input_text:
+        return False
+    normalized = input_text.strip().lower()
+    return bool(re.match(r"^(how to|how do i|how can i|what command|which command)\b", normalized))
+
+
+def _is_embedded_hash_hint(raw_input: str) -> bool:
+    if not raw_input or re.match(r"^\s*#", raw_input):
+        return False
+    hash_index = raw_input.find("#")
+    if hash_index <= 0:
+        return False
+    command_hint = raw_input[:hash_index].strip()
+    user_intent = raw_input[hash_index + 1 :].strip()
+    return bool(command_hint and user_intent)
+
+
+def _build_query_execution_policy(
+    raw_input: str,
+    normalized_input: str,
+    require_confirmation: bool,
+) -> QueryExecutionPolicy:
+    if _is_embedded_hash_hint(raw_input):
+        return QueryExecutionPolicy(
+            force_tool_confirmation=False,
+            suggested_command_confirmation=False,
+            force_command_oriented=True,
+        )
+
+    if _is_how_to_query(normalized_input):
+        return QueryExecutionPolicy(
+            force_tool_confirmation=True,
+            suggested_command_confirmation=True,
+            force_command_oriented=True,
+        )
+
+    return QueryExecutionPolicy(
+        force_tool_confirmation=None,
+        suggested_command_confirmation=require_confirmation,
+        force_command_oriented=False,
+    )
+
+
+def _strip_execute_prompt_lines(response_text: str) -> str:
+    """Remove model-emitted execution prompt lines from displayed output."""
+    if not response_text:
+        return response_text
+
+    lines = response_text.splitlines()
+    filtered = [line for line in lines if not _is_execute_prompt_line(line)]
+    return "\n".join(filtered).strip()
+
+
+def _is_execute_prompt_line(line: str) -> bool:
+    return bool(
+        re.match(
+            r"^\s*(?:do you want(?: me to)? execute|would you like(?: me)? to execute)\b",
+            line,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _is_command_oriented_query(user_query: Optional[str]) -> bool:
+    """Only suggest command execution for shell-oriented requests."""
+    if not user_query:
+        return False
+
+    query = user_query.strip().lower()
+    if not query or query.startswith("/"):
+        return False
+
+    general_starters = (
+        "why ",
+        "what is ",
+        "what are ",
+        "who ",
+        "where ",
+        "when ",
+        "explain ",
+        "tell me about ",
+    )
+    if query.startswith(general_starters) and not re.search(
+        r"\b(command|cli|shell|terminal|bash|zsh|powershell|cmd)\b", query
+    ):
+        return False
+
+    if re.search(r"[|;&<>`$()]", query):
+        return True
+
+    action_patterns = (
+        r"\bhow do i\b",
+        r"\bhow to\b",
+        r"\bcommand\b",
+        r"\bcli\b",
+        r"\bshell\b",
+        r"\bterminal\b",
+        r"\bbash\b",
+        r"\bzsh\b",
+        r"\bpowershell\b",
+        r"\bcmd\b",
+        r"\brun\b",
+        r"\bexecute\b",
+        r"\binstall\b",
+        r"\buninstall\b",
+        r"\blist\b",
+        r"\bshow\b",
+        r"\bcheck\b",
+        r"\bfind\b",
+        r"\bread\b",
+    )
+    if any(re.search(pattern, query) for pattern in action_patterns):
+        return True
+
+    command_tokens = (
+        "ls",
+        "pwd",
+        "grep",
+        "find",
+        "cat",
+        "sed",
+        "awk",
+        "git",
+        "docker",
+        "kubectl",
+        "python",
+        "pytest",
+        "npm",
+        "yarn",
+        "pnpm",
+    )
+    return bool(re.search(rf"\b({'|'.join(command_tokens)})\b", query))
 
 
 def _extract_suggested_command(
@@ -197,7 +365,13 @@ def _extract_suggested_command(
         lowered = line.lower()
         for prefix in prefixes:
             if lowered.startswith(prefix):
-                remainder = line[len(prefix) :].lstrip()
+                remainder = line[len(prefix) :]
+                # Only accept explicit command prefixes like:
+                # "Run: ls -la", "Use - ls", or "Try `git status`".
+                stripped_remainder = remainder.lstrip()
+                if not stripped_remainder.startswith((":", "-", "`", "$")):
+                    continue
+                remainder = stripped_remainder
                 if remainder.startswith((":", "-")):
                     remainder = remainder[1:].lstrip()
                 candidate = clean_command(remainder)
@@ -211,9 +385,6 @@ def _extract_suggested_command(
         tokens = re.findall(r"[A-Za-z0-9_./-]+", text)
         filtered = []
         for token in tokens:
-            if token.isdigit():
-                filtered.append(token)
-                continue
             if "/" in token or "." in token or "__" in token:
                 filtered.append(token.lower())
         return filtered
@@ -297,11 +468,15 @@ def _extract_suggested_command(
 
     candidates = []
 
-    match = re.search(r"do you want execute\s+`([^`]+)`", response_text, re.IGNORECASE)
-    if match:
-        item = add_candidate(match.group(1), "explicit")
-        if item:
-            candidates.append(item)
+    explicit_patterns = (
+        r"do you want(?: me to)? execute\s+`([^`]+)`",
+        r"would you like(?: me)? to execute\s+`([^`]+)`",
+    )
+    for pattern in explicit_patterns:
+        for match in re.finditer(pattern, response_text, re.IGNORECASE):
+            item = add_candidate(match.group(1), "explicit", match.start())
+            if item:
+                candidates.append(item)
 
     fence_matches = re.findall(r"```[a-zA-Z0-9_-]*\s*([^`]+?)\s*```", response_text, re.DOTALL)
     for idx, fence in enumerate(fence_matches):
@@ -331,15 +506,6 @@ def _extract_suggested_command(
             if item:
                 candidates.append(item)
             continue
-        item = add_candidate(stripped, "bare", idx)
-        if item:
-            candidates.append(item)
-
-    inline_commands = re.findall(r"`([^`]+)`", response_text)
-    for idx, inline in enumerate(inline_commands):
-        item = add_candidate(inline, "inline", idx)
-        if item:
-            candidates.append(item)
 
     if not candidates:
         return None
@@ -347,10 +513,10 @@ def _extract_suggested_command(
     if query_tokens:
         matched = [c for c in candidates if all(token in c["command"].lower() for token in query_tokens)]
         if matched:
-            matched.sort(key=lambda c: (len(c["parts"]), len(c["command"]), c["position"]))
+            matched.sort(key=lambda c: (c["score"], c["position"]), reverse=True)
             return matched[0]["command"]
 
-    candidates.sort(key=lambda c: (c["score"], -c["position"]), reverse=True)
+    candidates.sort(key=lambda c: (c["score"], c["position"]), reverse=True)
     return candidates[0]["command"]
 
 
@@ -359,6 +525,7 @@ async def _maybe_execute_suggested_command(
     config,
     quiet: bool = False,
     user_query: Optional[str] = None,
+    require_confirmation: bool = True,
 ) -> None:
     suggested_command = _extract_suggested_command(
         response_text,
@@ -368,9 +535,10 @@ async def _maybe_execute_suggested_command(
     if not suggested_command:
         return
 
-    question = f"do you want execute `{suggested_command}`?"
-    if not Confirm.ask(question, default=False, console=console):
-        return
+    if require_confirmation:
+        question = f"do you want execute `{suggested_command}`?"
+        if not Confirm.ask(question, default=False, console=console):
+            return
 
     from hashcli.tools.shell import ShellTool
 
@@ -659,7 +827,11 @@ def main(
         show_welcome()
         raise typer.Exit()
 
-    input_text = " ".join(query)
+    raw_input = " ".join(query)
+    input_text = _normalize_shell_input(raw_input)
+    if not input_text.strip():
+        show_welcome()
+        raise typer.Exit()
 
     try:
         config = load_configuration(
@@ -674,6 +846,8 @@ def main(
         if no_confirm:
             config.require_confirmation = False
 
+        query_policy = _build_query_execution_policy(raw_input, input_text, config.require_confirmation)
+
         # Validate API key setup
         validate_api_setup(config)
 
@@ -681,7 +855,16 @@ def main(
         if input_text.startswith("/"):
             execute_command_mode(input_text, config, quiet)
         else:
-            asyncio.run(execute_llm_mode(input_text, config, quiet))
+            asyncio.run(
+                execute_llm_mode(
+                    input_text,
+                    config,
+                    quiet,
+                    force_tool_confirmation=query_policy.force_tool_confirmation,
+                    suggested_command_confirmation=query_policy.suggested_command_confirmation,
+                    force_command_oriented=query_policy.force_command_oriented,
+                )
+            )
 
     except ConfigurationError as e:
         handle_error(e, debug)
@@ -706,42 +889,84 @@ def execute_command_mode(input_text: str, config, quiet: bool = False):
         display_result(result, config, quiet)
 
 
-async def execute_llm_mode(input_text: str, config, quiet: bool = False):
+async def execute_llm_mode(
+    input_text: str,
+    config,
+    quiet: bool = False,
+    force_tool_confirmation: Optional[bool] = None,
+    suggested_command_confirmation: bool = True,
+    force_command_oriented: bool = False,
+):
     """Execute query in LLM chat mode."""
     handler = LLMHandler(config)
 
     if config.streaming:
-        streamed_output = {"emitted": False, "buffer": []}
+        streamed_output = {"emitted": False, "buffer": [], "line_buffer": ""}
 
         def stream_handler(chunk: str) -> None:
             if not chunk:
                 return
             streamed_output["emitted"] = True
             streamed_output["buffer"].append(chunk)
-            console.print(chunk, end="", markup=False)
 
-        result = await handler.chat(input_text, stream_handler=stream_handler)
+            text = streamed_output["line_buffer"] + chunk
+            lines = text.split("\n")
+            streamed_output["line_buffer"] = lines.pop()
+
+            for line in lines:
+                if _is_execute_prompt_line(line):
+                    continue
+                console.print(line, markup=False)
+
+        chat_kwargs = {}
+        if force_tool_confirmation is not None:
+            chat_kwargs["force_tool_confirmation"] = force_tool_confirmation
+
+        result = await handler.chat(input_text, stream_handler=stream_handler, **chat_kwargs)
         final_text = result
         if streamed_output["emitted"]:
+            tail = streamed_output["line_buffer"]
+            if tail and not _is_execute_prompt_line(tail):
+                console.print(tail, markup=False)
             console.print()
             if not final_text:
                 final_text = "".join(streamed_output["buffer"])
         elif result:
-            display_result(result, config, quiet)
-        if final_text and not handler.last_tool_calls_executed:
-            await _maybe_execute_suggested_command(final_text, config, quiet, user_query=input_text)
+            display_result(_strip_execute_prompt_lines(result), config, quiet)
+        should_suggest = force_command_oriented or _is_command_oriented_query(input_text)
+        if final_text and not handler.last_tool_calls_executed and should_suggest:
+            await _maybe_execute_suggested_command(
+                final_text,
+                config,
+                quiet,
+                user_query=input_text,
+                require_confirmation=suggested_command_confirmation,
+            )
         return
 
     if not quiet:
         console.print(f"[dim]Thinking with {config.get_current_model()}...[/dim]")
-        result = await handler.chat(input_text)
+        chat_kwargs = {}
+        if force_tool_confirmation is not None:
+            chat_kwargs["force_tool_confirmation"] = force_tool_confirmation
+        result = await handler.chat(input_text, **chat_kwargs)
     else:
-        result = await handler.chat(input_text)
+        chat_kwargs = {}
+        if force_tool_confirmation is not None:
+            chat_kwargs["force_tool_confirmation"] = force_tool_confirmation
+        result = await handler.chat(input_text, **chat_kwargs)
 
     if result:
-        display_result(result, config, quiet)
-        if not handler.last_tool_calls_executed:
-            await _maybe_execute_suggested_command(result, config, quiet, user_query=input_text)
+        display_result(_strip_execute_prompt_lines(result), config, quiet)
+        should_suggest = force_command_oriented or _is_command_oriented_query(input_text)
+        if not handler.last_tool_calls_executed and should_suggest:
+            await _maybe_execute_suggested_command(
+                result,
+                config,
+                quiet,
+                user_query=input_text,
+                require_confirmation=suggested_command_confirmation,
+            )
 
 
 def display_result(result: str, config, quiet: bool = False):

@@ -420,6 +420,7 @@ Guidelines:
 
 Tool usage policy:
 - **Action Requests:** If the user asks you to perform an action or retrieve information directly (e.g., "show me disk usage", "list files", "read README.md", "check time"), **CALL THE TOOL DIRECTLY**. Do not ask for confirmation in text; the system handles that.
+- **Command-Hint Requests:** If the user explicitly provides a command hint (for example: "Use `find` as command hint"), treat it as an execution request and **CALL THE TOOL DIRECTLY** using that hint.
 - **Informational/How-to Requests:** If the user asks *how* to do something that involves a command (e.g., "how do I check disk usage", "explain ls command"), provide a text explanation. **DO NOT call the tool**. Instead, append a final line exactly: "do you want execute `<command>`?" (where `<command>` is the **full command string with all arguments**, e.g., `ls -la`, wrapped in backticks).
 - **General Knowledge:** For questions unrelated to system operations (e.g. "why is the sky blue"), simply answer the question. DO NOT append the "do you want execute" line. DO NOT use `echo` commands for plain text answers. Exception: If the answer depends on the current date/time (e.g. "how old is X"), you MUST use `execute_shell_command` with `date`.
 - **Time/Date:** For ANY query involving "today", "now", or calculating relative dates/ages, you MUST use `execute_shell_command` with `date` to obtain the system date.

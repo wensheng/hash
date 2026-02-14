@@ -1,47 +1,33 @@
 #!/usr/bin/env bash
 # Hash CLI Integration for bash
-# This script enables the # prefix trigger for Hash commands
+# This script enables interception for any command line containing #
 
 # Function to handle hash magic execution
 hash_magic_execute() {
     local line="$READLINE_LINE"
-    local trimmed_line="${line#"${line%%[![:space:]]*}"}"  # Trim leading whitespace
 
-    # Check if line starts with ##
-    if [[ "$trimmed_line" =~ ^## ]]; then
-        # Treat as comment / normal shell behavior
+    # Ignore lines containing '##' and let shell handle comments normally.
+    if [[ "$line" == *"##"* ]]; then
         return
-    # Check if line starts with #
-    elif [[ "$trimmed_line" =~ ^# ]]; then
+    # Intercept command line containing '#'
+    elif [[ "$line" == *"#"* ]]; then
         # Save the original line for history
         local original_line="$line"
-
-        # Extract command after #
-        local cmd="${trimmed_line#*#}"
-        cmd="${cmd#"${cmd%%[![:space:]]*}"}"  # Trim leading whitespace
 
         # Clear the current line
         READLINE_LINE=""
         READLINE_POINT=0
 
-        # Execute hashcli with the command
-        if [[ -n "$cmd" ]]; then
-            echo  # New line for output
-            hcli "$cmd" < /dev/tty
-            local exit_code=$?
-            echo  # Another new line
+        # Execute hashcli with the full original command line
+        echo  # New line for output
+        hcli "$original_line" < /dev/tty
+        local exit_code=$?
+        echo  # Another new line
 
-            # Show exit status if non-zero
-            if [[ $exit_code -ne 0 ]]; then
-                echo "Exit code: $exit_code"
-            fi
-        else
-            # Empty command after #, just show help
-            echo  # New line
-            hcli "/help"
-            echo  # Another new line
+        # Show exit status if non-zero
+        if [[ $exit_code -ne 0 ]]; then
+            echo "Exit code: $exit_code"
         fi
-
         # Add to shell history
         history -s "$original_line"
     else
