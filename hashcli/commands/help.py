@@ -14,70 +14,65 @@ class HelpCommand(Command):
 
         if args and args[0] != "":
             # Show help for specific command
-            return self._show_command_help(args[0])
+            return self._show_command_help(args[0], config)
         else:
             # Show general help
-            return self._show_general_help()
+            return self._show_general_help(config)
 
-    def _show_general_help(self) -> str:
+    def _show_general_help(self, config: HashConfig) -> str:
         """Show general help with all available commands."""
-        help_text = """Hash CLI - Intelligent Terminal Assistant
+        # Import here to avoid circular imports
+        from ..command_proxy import CommandProxy
 
-DUAL MODE OPERATION:
-  hashcli <natural language>  - LLM chat mode for questions & assistance
-  hashcli /<command>          - Command proxy mode for direct actions
+        proxy = CommandProxy(config)
+        available = proxy.get_available_commands()
 
-AVAILABLE COMMANDS:
-  /clean [options]            - Clear conversation history  
-  /model [options]            - Switch LLM models and providers
-  /fix <description>          - Get coding assistance
-  /tldr <command>             - Show quick command examples
+        core_cmds = {"help", "history"}
+        plugins = [cmd for cmd in available if cmd not in core_cmds]
+
+        help_text = """Hash CLI - Command Mode
+
+CORE COMMANDS:
   /help [command]             - Show help (this message)
-  /config                     - Show current configuration
-  /history [options]          - Manage conversation history
-  /exit, /quit                - Exit the application
+  /history [options]          - Manage conversation history"""
+
+        if plugins:
+            help_text += "\n\nPLUGINS:"
+            for cmd in plugins:
+                help_text += f"\n  /{cmd:<26}"
+        else:
+            help_text += (
+                "\n\nPLUGINS:\n"
+                "  None installed. Install with `hashcli --add-cmd <path-to-plugin>`."
+            )
+
+        help_text += """
 
 EXAMPLES:
-  # LLM Mode:
-  hashcli how do I find large files?
-  hashcli explain this error: permission denied
-  hashcli help me optimize this Python script
-  
-  # Command Mode:
-  hashcli /model set gpt-5-mini
-  hashcli /clean --days 7
-  hashcli /fix my tests are failing
-  hashcli /tldr tar
-
-GETTING STARTED:
-  1. Set API key: export OPENAI_API_KEY="your-key"
-  2. Try: hashcli hello world
-  3. Or: hashcli /help model
+  # /help history
+  # /history list
 
 For command-specific help: /help <command>"""
 
         return help_text
 
-    def _show_command_help(self, command_name: str) -> str:
+    def _show_command_help(self, command_name: str, config: HashConfig) -> str:
         """Show help for a specific command."""
         # Import here to avoid circular imports
         from ..command_proxy import CommandProxy
-        from ..config import HashConfig
 
-        # Create a temporary config to access command registry
-        temp_config = HashConfig()
-        proxy = CommandProxy(temp_config)
+        proxy = CommandProxy(config)
 
         # Get help for the specific command
         command_help = proxy.get_command_help(command_name)
 
         if command_help:
-            return f"Help for /{command_name}:\\n\\n{command_help}"
+            return f"Help for /{command_name}:\n\n{command_help}"
         else:
             available_commands = ", ".join(proxy.get_available_commands())
             return (
-                f"Unknown command: /{command_name}\\n\\nAvailable commands:"
-                f" {available_commands}\\n\\nUse '/help' for full help."
+                f"Unknown command: /{command_name}\n\nAvailable commands:"
+                f" {available_commands}\n\nUse '/help' for full help."
             )
 
     def get_help(self) -> str:
@@ -88,5 +83,4 @@ For command-specific help: /help <command>"""
   
 Examples:
   /help                    - Show this help
-  /help model              - Show help for model command
-  /help clean              - Show help for clean command"""
+  /help history            - Show help for history command"""

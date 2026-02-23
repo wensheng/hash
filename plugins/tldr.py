@@ -4,7 +4,7 @@
 import sys
 import os
 import re
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from zipfile import ZipFile
 from datetime import datetime
@@ -17,6 +17,9 @@ from termcolor import colored
 import ssl
 import shtab
 import shutil
+
+from hashcli.command_proxy import Command
+from hashcli.config import HashConfig
 
 __version__ = "3.4.3"
 __client_specification__ = "2.3"
@@ -436,14 +439,14 @@ def output(page: str, display_option_length: str, plain: bool = False) -> None:
         # Handle the command name
         elif line[0] == "#":
             line = " " * LEADING_SPACES_NUM + colored(line.replace("# ", ""), *colors_of("name")) + "\n"
-            sys.stdout.buffer.write(line.encode("utf-8"))
+            sys.stdout.write(line)
 
         # Handle the command description
         elif line[0] == ">":
             line = " " * (LEADING_SPACES_NUM - 1) + colored(
                 line.replace(">", "").replace("<", ""), *colors_of("description")
             )
-            sys.stdout.buffer.write(line.encode("utf-8"))
+            sys.stdout.write(line)
 
         # Handle an example description
         elif line[0] == "-":
@@ -464,7 +467,7 @@ def output(page: str, display_option_length: str, plain: bool = False) -> None:
             else:
                 line = "\n" + " " * LEADING_SPACES_NUM + colored(line, *colors_of("example"))
 
-            sys.stdout.buffer.write(line.encode("utf-8"))
+            sys.stdout.write(line)
 
         # Handle an example command
         elif line[0] == "`":
@@ -493,7 +496,7 @@ def output(page: str, display_option_length: str, plain: bool = False) -> None:
             line = line.replace("__ESCAPED_OPEN__", "{{")
             line = line.replace("__ESCAPED_CLOSE__", "}}")
 
-            sys.stdout.buffer.write(line.encode("utf-8"))
+            sys.stdout.write(line)
         print()
     print()
 
@@ -615,10 +618,7 @@ def create_parser() -> ArgumentParser:
     return parser
 
 
-def main() -> None:
-    parser = create_parser()
-
-    options = parser.parse_args()
+def main(options: Namespace) -> None:
 
     if sys.platform == "win32":
         import colorama
@@ -728,12 +728,41 @@ def main() -> None:
             sys.exit("Error fetching from tldr: {}".format(e))
 
 
-def cli() -> None:
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\nExited on keyboard interrupt.")
+class TLDRCommand(Command):
+    """Command to show TLDR pages via the bundled tldr client."""
 
+    def execute(self, args: List[str], config: HashConfig) -> str:
+        """Execute the TLDR lookup using system tldr command."""
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
 
-if __name__ == "__main__":
-    cli()
+        f_out = io.StringIO()
+        f_err = io.StringIO()
+
+        with redirect_stdout(f_out), redirect_stderr(f_err):
+            try:
+                parser = create_parser()
+                cmd_args = parser.parse_args(args)
+                main(cmd_args)
+            except SystemExit:
+                pass
+            except Exception as e:
+                print(f"Error: {e}")
+
+        output = f_out.getvalue()
+        error = f_err.getvalue()
+
+        if error:
+            return f"{output}\n{error}".strip()
+        return output.strip()
+
+    def get_help(self) -> str:
+        """Get help text for the tldr command."""
+        return """Show TLDR pages for a command:
+  /tldr <command>          - Show quick examples for a command
+  /tldr --list             - List available commands
+  /tldr --search <term>    - Search commands
+
+Examples:
+  /tldr tar
+  /tldr --search docker"""

@@ -14,11 +14,12 @@ import asyncio
 import os
 import re
 import shlex
+import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import Optional
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 import typer
 from rich import box
@@ -27,7 +28,11 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.prompt import Confirm
 
-from hashcli.command_proxy import CommandProxy
+from hashcli.command_proxy import (
+    CommandProxy,
+    get_user_plugin_directory,
+    load_command_class_from_file,
+)
 from hashcli.config import (
     ConfigurationError,
     LLMProvider,
@@ -125,6 +130,59 @@ def _build_query_execution_policy(
     )
 
 
+def _resolve_add_cmd_source(add_cmd_value: str) -> Path:
+    """Resolve --add-cmd input to a Python plugin file."""
+    source_path = Path(add_cmd_value).expanduser()
+    if not source_path.exists():
+        raise ValueError(f"Plugin source does not exist: {source_path}")
+
+    if source_path.is_file():
+        if source_path.suffix != ".py":
+            raise ValueError(f"Plugin source must be a .py file: {source_path}")
+        return source_path.resolve()
+
+    if source_path.is_dir():
+        python_files = sorted(
+            path
+            for path in source_path.rglob("*.py")
+            if path.is_file() and path.name != "__init__.py" and not path.name.startswith("_")
+        )
+        if not python_files:
+            raise ValueError(f"No Python plugin file found in directory: {source_path}")
+        if len(python_files) == 1:
+            return python_files[0].resolve()
+
+        name_matched = [path for path in python_files if path.stem.lower() == source_path.name.lower()]
+        if len(name_matched) == 1:
+            return name_matched[0].resolve()
+
+        candidates = ", ".join(path.name for path in python_files)
+        raise ValueError(
+            "Directory contains multiple Python files. "
+            f"Provide a specific plugin file path. Candidates: {candidates}"
+        )
+
+    raise ValueError(f"Invalid plugin source path: {source_path}")
+
+
+def _install_plugin_from_path(add_cmd_value: str) -> Tuple[str, Path, str]:
+    """Validate and install a third-party slash-command plugin."""
+    source_file = _resolve_add_cmd_source(add_cmd_value)
+    command_class = load_command_class_from_file(source_file)
+
+    plugin_dir = get_user_plugin_directory()
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+
+    destination_file = plugin_dir / source_file.name
+    shutil.copy2(source_file, destination_file)
+
+    # Re-validate from installation path to ensure runtime loading works.
+    installed_class = load_command_class_from_file(destination_file)
+    command_name = destination_file.stem.lower()
+
+    return command_name, destination_file, installed_class.__name__
+
+
 def _strip_execute_prompt_lines(response_text: str) -> str:
     """Remove model-emitted execution prompt lines from displayed output."""
     if not response_text:
@@ -136,6 +194,8 @@ def _strip_execute_prompt_lines(response_text: str) -> str:
 
 
 def _is_execute_prompt_line(line: str) -> bool:
+    if line.startswith("SUGGESTED_COMMAND:"):
+        return True
     return bool(
         re.match(
             r"^\s*(?:do you want(?: me to)? execute|would you like(?: me)? to execute)\b",
@@ -429,11 +489,14 @@ def _extract_suggested_command(
 
         return " ".join(quote_part(part) for part in normalized)
 
-    def add_candidate(candidate: str, source: str, position: int = 0) -> Optional[dict]:
+    def add_candidate(
+        candidate: str, source: str, position: int = 0, normalize: bool = True
+    ) -> Optional[dict]:
         cleaned = clean_command(candidate)
         if not is_probable_command(cleaned):
             return None
-        cleaned = normalize_command(cleaned)
+        if normalize:
+            cleaned = normalize_command(cleaned)
         base_scores = {
             "explicit": 100,
             "fence": 90,
@@ -471,10 +534,13 @@ def _extract_suggested_command(
     explicit_patterns = (
         r"do you want(?: me to)? execute\s+`([^`]+)`",
         r"would you like(?: me)? to execute\s+`([^`]+)`",
+        r"SUGGESTED_COMMAND:\s*`?([^`\n]+)`?",
     )
     for pattern in explicit_patterns:
         for match in re.finditer(pattern, response_text, re.IGNORECASE):
-            item = add_candidate(match.group(1), "explicit", match.start())
+            item = add_candidate(
+                match.group(1), "explicit", match.start(), normalize=False
+            )
             if item:
                 candidates.append(item)
 
@@ -570,9 +636,9 @@ hashcli help me debug this python script
 
 **Command Proxy Mode** (Direct commands with `/` prefix):
 ```bash
-hashcli /model gpt-5-mini
-hashcli /clean
-hashcli /fix "implement authentication"
+hashcli /help
+hashcli /history list
+hashcli --add-cmd plugins/hello.py
 ```
 
 ## Quick Start
@@ -821,8 +887,29 @@ def main(
         is_eager=True,
         help="Interactively configure model provider and model.",
     ),
+    add_cmd: Optional[str] = typer.Option(
+        None,
+        "--add-cmd",
+        help="Install a slash-command plugin from a .py file or folder.",
+    ),
 ):
     """Main function for the Hash CLI."""
+    if add_cmd:
+        try:
+            command_name, destination_file, class_name = _install_plugin_from_path(add_cmd)
+            console.print(f"[green]Installed plugin:[/green] {destination_file}")
+            console.print(f"[green]Validated command class:[/green] {class_name}")
+            console.print(f"[green]Available slash command:[/green] /{command_name}")
+            raise typer.Exit(0)
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+        except typer.Exit:
+            raise
+        except Exception as e:
+            console.print(f"[red]Error adding plugin: {e}[/red]")
+            raise typer.Exit(1)
+
     if not query:
         show_welcome()
         raise typer.Exit()

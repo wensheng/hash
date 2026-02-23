@@ -2,10 +2,9 @@
 
 from unittest.mock import patch, MagicMock
 
-from hashcli.command_proxy import CommandProxy
-from hashcli.commands.clear import ClearCommand
+from hashcli.command_proxy import Command, CommandProxy
 from hashcli.commands.help import HelpCommand
-from hashcli.commands.tldr import TLDRCommand
+from plugins.tldr import TLDRCommand
 
 
 class TestCommandProxy:
@@ -18,18 +17,23 @@ class TestCommandProxy:
         available_commands = proxy.get_available_commands()
 
         expected_commands = [
-            "clean",
-            "model",
-            "fix",
-            "tldr",
             "help",
-            "config",
             "history",
-            "exit",
-            "quit",
         ]
         for cmd in expected_commands:
             assert cmd in available_commands
+
+    def test_no_builtin_plugins_without_installation(self, sample_config, temp_dir, mocker):
+        """Only core slash commands are available when no plugins are installed."""
+        empty_home = temp_dir / "home"
+        empty_home.mkdir()
+        mocker.patch("hashcli.command_proxy.Path.home", return_value=empty_home)
+
+        proxy = CommandProxy(sample_config)
+        available = proxy.get_available_commands()
+
+        assert "help" in available
+        assert "history" in available
 
     def test_command_parsing(self, sample_config):
         """Test command line parsing."""
@@ -44,12 +48,16 @@ class TestCommandProxy:
         """Test command with arguments."""
         proxy = CommandProxy(sample_config)
 
-        # Mock the clean command
-        with patch.object(
-            proxy.commands["clean"], "execute", return_value="History cleaned"
-        ):
-            result = proxy.execute("/clean --days 7")
-            assert "History cleaned" in result
+        class EchoCommand(Command):
+            def execute(self, args):
+                return " ".join(args)
+
+            def get_help(self):
+                return "echo args"
+
+        proxy.commands["echo"] = EchoCommand()
+        result = proxy.execute("/echo hello world")
+        assert result == "hello world"
 
     def test_unknown_command(self, sample_config):
         """Test handling of unknown commands."""
@@ -89,80 +97,21 @@ class TestCommandProxy:
         unknown_help = proxy.get_command_help("nonexistent")
         assert unknown_help is None
 
+    def test_command_without_config_argument(self, sample_config):
+        """Third-party commands may implement execute(self, args) only."""
 
-class TestTLDRCommand:
-    """Test the TLDR command."""
+        class HelloNoConfigCommand(Command):
+            def execute(self, args):
+                return "hello without config"
 
-    def test_tldr_command_basic(self, sample_config):
-        """Test basic TLDR command execution."""
-        tldr_cmd = TLDRCommand()
+            def get_help(self):
+                return "help"
 
-        with patch("hashcli.commands.tldr.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                stdout="tar -cf archive.tar file1 file2\\n",
-                stderr="",
-                returncode=0,
-            )
+        proxy = CommandProxy(sample_config)
+        proxy.commands["hello"] = HelloNoConfigCommand()
 
-            result = tldr_cmd.execute(["tar"], sample_config)
-
-            assert "tar -cf archive.tar" in result
-            assert mock_run.called
-
-class TestClearCommand:
-    """Test the Clear command."""
-
-    def test_clear_command_history_disabled(self):
-        """Test clear command when history is disabled."""
-        from hashcli.config import HashConfig
-
-        config = HashConfig(history_enabled=False)
-
-        clear_cmd = ClearCommand()
-        result = clear_cmd.execute([], config)
-
-        assert "History is disabled" in result
-
-    def test_clear_command_basic(self, sample_config, temp_dir):
-        """Test basic clear command."""
-        # Set up temporary history directory
-        sample_config.history_dir = temp_dir / "history"
-        sample_config.history_dir.mkdir(exist_ok=True)
-
-        clear_cmd = ClearCommand()
-
-        # Mock history operations
-        with patch("hashcli.history.ConversationHistory") as mock_history_class:
-            mock_history = MagicMock()
-            mock_history.clear_old_history.return_value = 5
-            mock_history_class.return_value = mock_history
-
-            result = clear_cmd.execute([], sample_config)
-            assert "Cleared 5 old conversations" in result
-
-    def test_clear_command_all_history(self, sample_config, temp_dir):
-        """Test clearing all history."""
-        sample_config.history_dir = temp_dir / "history"
-        sample_config.history_dir.mkdir(exist_ok=True)
-
-        clear_cmd = ClearCommand()
-
-        with patch("hashcli.history.ConversationHistory") as mock_history_class:
-            mock_history = MagicMock()
-            mock_history.clear_all_history.return_value = True
-            mock_history_class.return_value = mock_history
-
-            result = clear_cmd.execute(["--all"], sample_config)
-            assert "All conversation history cleared" in result
-
-    def test_clear_help(self):
-        """Test clear command help."""
-        clear_cmd = ClearCommand()
-        help_text = clear_cmd.get_help()
-
-        assert "Clean conversation history" in help_text
-        assert "--all" in help_text
-        assert "--days" in help_text
+        result = proxy.execute("/hello")
+        assert result == "hello without config"
 
 
 class TestHelpCommand:
@@ -174,16 +123,49 @@ class TestHelpCommand:
         result = help_cmd.execute([], sample_config)
 
         assert "Hash CLI" in result
-        assert "DUAL MODE OPERATION" in result
-        assert "/clean" in result
+        assert "Command Mode" in result
+        assert "PLUGINS" in result
         assert "/help" in result
+
+    def test_help_shows_installed_plugin(self, sample_config, temp_dir, mocker):
+        """General help should list installed plugins."""
+        plugin_home = temp_dir / "home"
+        plugin_dir = plugin_home / ".hashcli" / "plugins"
+        plugin_dir.mkdir(parents=True)
+        plugin_file = plugin_dir / "hello.py"
+        plugin_file.write_text(
+            "\n".join(
+                [
+                    "from typing import List",
+                    "from hashcli.command_proxy import Command",
+                    "from hashcli.config import HashConfig",
+                    "",
+                    "class HelloCommand(Command):",
+                    "    def execute(self, args: List[str], config: HashConfig) -> str:",
+                    "        return 'hello'",
+                    "",
+                    "    def get_help(self) -> str:",
+                    "        return 'hello help'",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        mocker.patch("hashcli.command_proxy.Path.home", return_value=plugin_home)
+
+        help_cmd = HelpCommand()
+        result = help_cmd.execute([], sample_config)
+
+        assert "PLUGINS" in result
+        assert "/hello" in result
 
     def test_help_specific_command(self, sample_config):
         """Test help for specific command."""
         help_cmd = HelpCommand()
-        result = help_cmd.execute(["clean"], sample_config)
+        result = help_cmd.execute(["history"], sample_config)
 
-        assert "Help for /clean" in result
+        assert "Help for /history" in result
 
     def test_help_unknown_command(self, sample_config):
         """Test help for unknown command."""

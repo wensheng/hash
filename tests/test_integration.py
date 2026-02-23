@@ -20,11 +20,11 @@ class TestMainEntryPoint:
             mock_proxy.execute.return_value = "Command executed successfully"
             mock_proxy_class.return_value = mock_proxy
 
-            execute_command_mode("/clean --days 7", sample_config, quiet=True)
+            execute_command_mode("/history list", sample_config, quiet=True)
 
             # Verify CommandProxy was called
             mock_proxy_class.assert_called_once_with(sample_config)
-            mock_proxy.execute.assert_called_once_with("/clean --days 7")
+            mock_proxy.execute.assert_called_once_with("/history list")
 
     @pytest.mark.asyncio
     async def test_llm_mode_detection(self, sample_config):
@@ -266,32 +266,110 @@ class TestCommandIntegration:
         result = proxy.execute("/help")
 
         assert "Hash CLI" in result
-        assert "DUAL MODE OPERATION" in result
-        assert "/clean" in result
+        assert "Command Mode" in result
         assert "/help" in result
+        assert "/history" in result
 
-    def test_model_command_integration(self, sample_config):
-        """Test model command integration."""
-        proxy = CommandProxy(sample_config)
+    def test_installed_plugin_command_integration(self, sample_config, temp_dir):
+        """Installed plugin should be available as a slash command."""
+        plugin_home = temp_dir / "home"
+        plugin_dir = plugin_home / ".hashcli" / "plugins"
+        plugin_dir.mkdir(parents=True)
+        plugin_file = plugin_dir / "hello.py"
+        plugin_file.write_text(
+            "\n".join(
+                [
+                    "from typing import List",
+                    "from hashcli.command_proxy import Command",
+                    "",
+                    "class HelloCommand(Command):",
+                    "    def execute(self, args: List[str]) -> str:",
+                    "        return 'hello plugin'",
+                    "",
+                    "    def get_help(self) -> str:",
+                    "        return 'hello help'",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
-        # Test showing current config
-        result = proxy.execute("/model")
+        with patch("hashcli.command_proxy.Path.home", return_value=plugin_home):
+            proxy = CommandProxy(sample_config)
+            result = proxy.execute("/hello")
 
-        assert "Current Configuration" in result
-        assert "Provider:" in result
-        assert "Model:" in result
-        assert "API Key:" in result
+        assert result == "hello plugin"
 
-    def test_config_command_integration(self, sample_config):
-        """Test config command integration."""
-        proxy = CommandProxy(sample_config)
+    def test_plugin_command_help_integration(self, sample_config, temp_dir):
+        """Help output should include installed plugins."""
+        plugin_home = temp_dir / "home"
+        plugin_dir = plugin_home / ".hashcli" / "plugins"
+        plugin_dir.mkdir(parents=True)
+        plugin_file = plugin_dir / "hello.py"
+        plugin_file.write_text(
+            "\n".join(
+                [
+                    "from typing import List",
+                    "from hashcli.command_proxy import Command",
+                    "",
+                    "class HelloCommand(Command):",
+                    "    def execute(self, args: List[str]) -> str:",
+                    "        return 'hello plugin'",
+                    "",
+                    "    def get_help(self) -> str:",
+                    "        return 'hello help'",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
-        result = proxy.execute("/config")
+        with patch("hashcli.command_proxy.Path.home", return_value=plugin_home):
+            proxy = CommandProxy(sample_config)
+            result = proxy.execute("/help")
 
-        assert "Hash CLI Configuration" in result
-        assert "LLM Configuration" in result
-        assert "Tool Configuration" in result
-        assert "History Configuration" in result
+        assert "PLUGINS" in result
+        assert "/hello" in result
+
+    def test_plugin_help_detail_integration(self, sample_config, temp_dir):
+        """Plugin-specific help should be retrievable."""
+        plugin_home = temp_dir / "home"
+        plugin_dir = plugin_home / ".hashcli" / "plugins"
+        plugin_dir.mkdir(parents=True)
+        plugin_file = plugin_dir / "hello.py"
+        plugin_file.write_text(
+            "\n".join(
+                [
+                    "from typing import List",
+                    "from hashcli.command_proxy import Command",
+                    "",
+                    "class HelloCommand(Command):",
+                    "    def execute(self, args: List[str]) -> str:",
+                    "        return 'hello plugin'",
+                    "",
+                    "    def get_help(self) -> str:",
+                    "        return 'hello help'",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        with patch("hashcli.command_proxy.Path.home", return_value=plugin_home):
+            proxy = CommandProxy(sample_config)
+            result = proxy.execute("/help hello")
+
+        assert "Help for /hello" in result
+        assert "hello help" in result
+
+    def test_non_installed_plugin_command_is_unknown(self, sample_config, temp_dir):
+        """Plugin commands are unavailable until installed via add-cmd."""
+        plugin_home = temp_dir / "home"
+        plugin_home.mkdir()
+        with patch("hashcli.command_proxy.Path.home", return_value=plugin_home):
+            proxy = CommandProxy(sample_config)
+            result = proxy.execute("/model")
+        assert "Unknown command: /model" in result
 
 
 class TestErrorHandling:

@@ -27,36 +27,49 @@ class GoogleProvider(LLMProvider):
         """Generate response using Google AI API."""
 
         try:
+            disable_tool_calls = self._should_disable_tool_calls(messages)
+
             # Prepare messages and tools
             if self.is_gemma_model and tools:
-                # Inject tools into system prompt for Gemma
-                tool_prompt = self._format_tools_for_system_prompt(tools)
-                # Work on a copy of messages to avoid modifying the original list
-                messages_copy = [m.copy() for m in messages]
-                
-                found_system = False
-                for msg in messages_copy:
-                    if msg.get("role") == "system":
-                        msg["content"] += tool_prompt
-                        found_system = True
-                        break
-                
-                if not found_system:
-                    messages_copy.insert(0, {"role": "system", "content": tool_prompt})
-                
-                google_messages = self._format_messages_for_provider(messages_copy)
-                google_tools = None
+                if disable_tool_calls:
+                    google_messages = self._format_messages_for_provider(messages)
+                    google_tools = None
+                else:
+                    # Inject tools into system prompt for Gemma
+                    tool_prompt = self._format_tools_for_system_prompt(tools)
+                    # Work on a copy of messages to avoid modifying the original list
+                    messages_copy = [m.copy() for m in messages]
+
+                    found_system = False
+                    for msg in messages_copy:
+                        if msg.get("role") == "system":
+                            msg["content"] += tool_prompt
+                            found_system = True
+                            break
+
+                    if not found_system:
+                        messages_copy.insert(0, {"role": "system", "content": tool_prompt})
+
+                    google_messages = self._format_messages_for_provider(messages_copy)
+                    google_tools = None
             else:
                 google_messages = self._format_messages_for_provider(messages)
                 google_tools = None
                 if tools:
                     google_tools = self._convert_tools_to_google_format(tools)
 
+            tool_config = None
+            if disable_tool_calls and google_tools:
+                tool_config = types.ToolConfig(
+                    function_calling_config=types.FunctionCallingConfig(mode=types.FunctionCallingConfigMode.NONE)
+                )
+
             # Prepare generation config
             config = types.GenerateContentConfig(
                 temperature=0.7,
                 max_output_tokens=self.config.max_response_tokens,
                 tools=google_tools,
+                tool_config=tool_config,
                 safety_settings=[
                     types.SafetySetting(
                         category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
@@ -165,6 +178,25 @@ class GoogleProvider(LLMProvider):
                 error_message = "Content was blocked by Google's safety filters."
 
             return LLMResponse(content=f"Google AI error: {error_message}", model=self.model_name)
+
+    def _should_disable_tool_calls(self, messages: List[Dict[str, Any]]) -> bool:
+        """Disable tool calling for how-to informational prompts."""
+        latest_user_message = self._get_latest_user_message(messages)
+        if not latest_user_message:
+            return False
+
+        normalized = latest_user_message.strip().lower()
+        return bool(re.match(r"^(how to|how do i|how can i|what command|which command)\b", normalized))
+
+    def _get_latest_user_message(self, messages: List[Dict[str, Any]]) -> str:
+        """Extract the latest user text message from conversation history."""
+        for message in reversed(messages):
+            if message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return content
+        return ""
 
     def _convert_tools_to_google_format(self, tools: List[Dict[str, Any]]) -> List[types.Tool]:
         """Convert OpenAI-style tools to Google AI format."""
@@ -421,13 +453,11 @@ Guidelines:
 Tool usage policy:
 - **Action Requests:** If the user asks you to perform an action or retrieve information directly (e.g., "show me disk usage", "list files", "read README.md", "check time"), **CALL THE TOOL DIRECTLY**. Do not ask for confirmation in text; the system handles that.
 - **Command-Hint Requests:** If the user explicitly provides a command hint (for example: "Use `find` as command hint"), treat it as an execution request and **CALL THE TOOL DIRECTLY** using that hint.
-- **Informational/How-to Requests:** If the user asks *how* to do something that involves a command (e.g., "how do I check disk usage", "explain ls command"), provide a text explanation. **DO NOT call the tool**. Instead, append a final line exactly: "do you want execute `<command>`?" (where `<command>` is the **full command string with all arguments**, e.g., `ls -la`, wrapped in backticks).
-- **General Knowledge:** For questions unrelated to system operations (e.g. "why is the sky blue"), simply answer the question. DO NOT append the "do you want execute" line. DO NOT use `echo` commands for plain text answers. Exception: If the answer depends on the current date/time (e.g. "how old is X"), you MUST use `execute_shell_command` with `date`.
+- **Informational/How-to Requests:** If the user asks *how* to do something that involves a command (e.g., "how do I check disk usage", "explain ls command"), provide a text explanation. **DO NOT call the tool**. Instead, on the last line of your response, output exactly: `SUGGESTED_COMMAND: <command>` (where `<command>` is the full command string to execute).
+- **General Knowledge:** For questions unrelated to system operations (e.g. "why is the sky blue"), simply answer the question. DO NOT append the "SUGGESTED_COMMAND" line. DO NOT use `echo` commands for plain text answers. Exception: If the answer depends on the current date/time (e.g. "how old is X"), you MUST use `execute_shell_command` with `date`.
 - **Time/Date:** For ANY query involving "today", "now", or calculating relative dates/ages, you MUST use `execute_shell_command` with `date` to obtain the system date.
 - **Web Search:** Use the `web_search` tool only when the user explicitly asks to search/browse or requests sources, or when the answer is time-sensitive/likely to change (e.g., current events, prices, schedules). Do **not** use it for general knowledge or explanatory questions (e.g., "why is the sky blue").
 - **System Checks:** For local checks (OS, username, directory), use the appropriate tool.
 - **Ambiguity:** If unsure whether to execute, err on the side of explaining (text response).
-
-Never include the confirmation line ("do you want execute...") if you are calling a tool. That line is ONLY for text-based suggestions where you did NOT call a tool.
 
 You have access to tools that can interact with the system. Use them appropriately to assist the user effectively."""

@@ -2,8 +2,8 @@
 
 from typing import List
 
-from ..command_proxy import Command
-from ..config import HashConfig, LLMProvider, get_model_options
+from hashcli.command_proxy import Command
+from hashcli.config import HashConfig, LLMProvider, get_model_options
 
 
 class ModelCommand(Command):

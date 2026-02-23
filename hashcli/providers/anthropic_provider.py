@@ -220,6 +220,4 @@ Tool usage policy:
 - **System Checks:** For local checks (OS, username, directory), use the appropriate tool.
 - **Ambiguity:** If unsure whether to execute, err on the side of explaining (text response).
 
-Never include the confirmation line ("do you want execute...") if you are calling a tool. That line is ONLY for text-based suggestions where you did NOT call a tool.
-
 You have access to tools that can interact with the system. Use them appropriately to assist the user effectively."""

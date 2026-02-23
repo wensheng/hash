@@ -44,7 +44,7 @@ class HashConfig(BaseModel):
         default="low", description="Text verbosity for GPT-5 models (low/medium/high)"
     )
     anthropic_api_key: Optional[str] = Field(default=None, description="Anthropic API key")
-    anthropic_model: str = Field(default="claude-3-sonnet-20240229", description="Default Anthropic model")
+    anthropic_model: str = Field(default="claude-haiku-4-5-20251001", description="Default Anthropic model")
     google_api_key: Optional[str] = Field(default=None, description="Google AI API key")
     google_model: str = Field(default="gemini-2.5-flash-lite", description="Default Google model")
     max_response_tokens: int = Field(default=4096, description="Maximum tokens in LLM responses")
@@ -76,6 +76,12 @@ class HashConfig(BaseModel):
     blocked_commands: List[str] = Field(
         default_factory=lambda: ["rm -rf", "sudo", "su"],
         description="Blacklist of blocked commands",
+    )
+
+    # Command Plugin Configuration
+    plugin_commands: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Map of command names to plugin import paths or file paths",
     )
 
     class Config:

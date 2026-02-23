@@ -1,6 +1,6 @@
 # Hash CLI
 
-Hash (HAcker SHell) is an intelligent terminal assistant that combines LLM-powered conversational assistance with command-line productivity tools. Ask questions in plain English, manage your development workflow, and keep your shell flow fast without losing control or safety.
+Hashcli is an intelligent terminal assistant that combines LLM-powered conversational assistance with command-line productivity tools. Ask questions in plain English, manage your development workflow, and keep your shell flow fast without losing control or safety.
 
 ## Why Hash CLI
 
@@ -29,9 +29,11 @@ Set up Shell integration:
 hashcli --setup
 ```
 
-Set up api key in your terminal:
+Set up one of the following api keys in your terminal:
 
+    export GOOGLE_API_KEY="your-key"
     export OPENAI_API_KEY="your-key"
+    export ANTHROPIC_API_KEY="your-key"
 
 If you prefer a guided setup:
 ```bash
@@ -48,7 +50,8 @@ hashcli --config
 
 ## Features (from the current code)
 
-- **Built-in Commands**: `/clean`, `/config`, `/fix`, `/help`, `/history`, `/model`, `/tldr`, `/exit`, `/quit`
+- **Core slash commands**: `/help`, `/history`
+- **Plugin slash commands**: install with `hashcli --add-cmd <path-to-plugin.py>` (installed under `~/.hashcli/plugins`)
 - **LLM Tools**:
   - `execute_shell_command` (guarded shell execution with timeouts and allow/block lists)
   - `read_file`, `write_file`, `list_directory` (filesystem operations with safety checks)
@@ -57,6 +60,13 @@ hashcli --config
 - **History management**: list sessions, show a session, clear old or all history
 - **Streaming output**: optional streaming for responses
 - **Interactive config wizard**: `hashcli --config` for provider, model, and API key setup
+
+Plugin example:
+
+```bash
+hashcli --add-cmd plugins/model.py
+hashcli /model list
+```
 
 ## Configuration
 

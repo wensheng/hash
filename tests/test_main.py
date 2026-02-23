@@ -87,8 +87,128 @@ def test_command_mode_execution(mocker):
     mock_instance.execute.return_value = "command output"
 
     config = HashConfig()
-    execute_command_mode("/clean", config)
-    mock_instance.execute.assert_called_with("/clean")
+    execute_command_mode("/history list", config)
+    mock_instance.execute.assert_called_with("/history list")
+
+
+def test_add_cmd_installs_valid_plugin_file(mocker, tmp_path):
+    """--add-cmd should validate and install a plugin file."""
+    plugin_file = tmp_path / "hello.py"
+    plugin_file.write_text(
+        "\n".join(
+            [
+                "from typing import List",
+                "from hashcli.command_proxy import Command",
+                "",
+                "class HelloCommand(Command):",
+                "    def execute(self, args: List[str]) -> str:",
+                "        return 'hello world'",
+                "",
+                "    def get_help(self) -> str:",
+                "        return 'say hello'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    mock_home = tmp_path / "home"
+    mock_home.mkdir()
+    mocker.patch("hashcli.command_proxy.Path.home", return_value=mock_home)
+
+    result = runner.invoke(app, ["--add-cmd", str(plugin_file)])
+
+    installed_file = mock_home / ".hashcli" / "plugins" / "hello.py"
+    assert result.exit_code == 0
+    assert installed_file.exists()
+    assert "Available slash command" in result.stdout
+    assert "/hello" in result.stdout
+
+    from hashcli.command_proxy import CommandProxy
+
+    proxy = CommandProxy(HashConfig())
+    assert "hello" in proxy.get_available_commands()
+    assert proxy.execute("/hello") == "hello world"
+
+
+def test_add_cmd_accepts_directory_with_single_plugin_file(mocker, tmp_path):
+    """--add-cmd should accept a directory containing one plugin file."""
+    plugin_dir = tmp_path / "plugin_dir"
+    plugin_dir.mkdir()
+    plugin_file = plugin_dir / "goodbye.py"
+    plugin_file.write_text(
+        "\n".join(
+            [
+                "from typing import List",
+                "from hashcli.command_proxy import Command",
+                "from hashcli.config import HashConfig",
+                "",
+                "class GoodbyeCommand(Command):",
+                "    def execute(self, args: List[str], config: HashConfig) -> str:",
+                "        return 'bye'",
+                "",
+                "    def get_help(self) -> str:",
+                "        return 'say bye'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    mock_home = tmp_path / "home"
+    mock_home.mkdir()
+    mocker.patch("hashcli.command_proxy.Path.home", return_value=mock_home)
+
+    result = runner.invoke(app, ["--add-cmd", str(plugin_dir)])
+
+    installed_file = mock_home / ".hashcli" / "plugins" / "goodbye.py"
+    assert result.exit_code == 0
+    assert installed_file.exists()
+    assert "/goodbye" in result.stdout
+
+
+def test_add_cmd_rejects_plugin_without_command_subclass(mocker, tmp_path):
+    """--add-cmd should fail if plugin file has no Command subclass."""
+    bad_plugin = tmp_path / "bad.py"
+    bad_plugin.write_text(
+        "\n".join(
+            [
+                "class NotACommand:",
+                "    pass",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    mock_home = tmp_path / "home"
+    mock_home.mkdir()
+    mocker.patch("hashcli.command_proxy.Path.home", return_value=mock_home)
+
+    result = runner.invoke(app, ["--add-cmd", str(bad_plugin)])
+
+    assert result.exit_code == 1
+    assert "No Command subclass found" in result.stdout
+
+
+def test_add_cmd_installs_repo_plugins_config_command(mocker, tmp_path):
+    """Plugin templates in root plugins/ should install via --add-cmd."""
+    mock_home = tmp_path / "home"
+    mock_home.mkdir()
+    mocker.patch("hashcli.command_proxy.Path.home", return_value=mock_home)
+
+    result = runner.invoke(app, ["--add-cmd", "plugins/hello.py"])
+
+    installed_file = mock_home / ".hashcli" / "plugins" / "hello.py"
+    assert result.exit_code == 0
+    assert installed_file.exists()
+    assert "/hello" in result.stdout
+
+    from hashcli.command_proxy import CommandProxy
+
+    proxy = CommandProxy(HashConfig())
+    assert "hello" in proxy.get_available_commands()
+    assert "Hello from" in proxy.execute("/hello")
 
 
 def test_normalize_shell_input_leading_hash_query():
@@ -218,7 +338,7 @@ def test_main_routes_embedded_hash_to_enhanced_llm_mode(mocker):
     mocker.patch("hashcli.main.load_configuration", return_value=config)
     mocker.patch("hashcli.main.validate_api_setup")
     command_mode = mocker.patch("hashcli.main.execute_command_mode")
-    llm_mode = mocker.AsyncMock()
+    llm_mode = mocker.Mock(return_value=None)
     mocker.patch("hashcli.main.execute_llm_mode", llm_mode)
     mocker.patch("hashcli.main.asyncio.run")
 

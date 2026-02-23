@@ -201,7 +201,7 @@ show_usage() {
     echo "Examples:"
     echo "  # how do I list files recursively?"
     echo "  # /help"
-    echo "  # /model gpt-4"
+    echo "  # /history list"
 }
 
 # Main installation function
