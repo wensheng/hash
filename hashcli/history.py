@@ -82,19 +82,23 @@ class ConversationHistory:
 
             conn.commit()
 
-    def start_session(self, title: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> str:
+    def start_session(
+        self, title: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None
+    ) -> str:
         """Start a new conversation session."""
-        session_id = str(uuid.uuid4())
+        session_id = session_id or str(uuid.uuid4())
 
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
-                INSERT INTO sessions (id, title, metadata)
-                VALUES (?, ?, ?)
-            """,
-                (session_id, title, json.dumps(metadata) if metadata else None),
-            )
-            conn.commit()
+            cursor = conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
+            if cursor.fetchone() is None:
+                conn.execute(
+                    """
+                    INSERT INTO sessions (id, title, metadata)
+                    VALUES (?, ?, ?)
+                """,
+                    (session_id, title, json.dumps(metadata) if metadata else None),
+                )
+                conn.commit()
 
         return session_id
 

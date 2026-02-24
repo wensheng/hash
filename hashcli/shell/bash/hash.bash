@@ -2,6 +2,10 @@
 # Hash CLI Integration for bash
 # This script enables interception for any command line containing #
 
+if [[ -z "$HASHCLI_SESSION_ID" ]]; then
+    export HASHCLI_SESSION_ID=$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || echo "$$-$(date +%s)")
+fi
+
 # Function to handle hash magic execution
 hash_magic_execute() {
     local line="$READLINE_LINE"

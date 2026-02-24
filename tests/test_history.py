@@ -128,14 +128,10 @@ class TestConversationHistory:
 
         # Just check some basic properties to make sure it's working
         assert len([m for m in recent if m["role"] == "user"]) == 3  # 3 user messages
-        assert (
-            len([m for m in recent if m["role"] == "assistant"]) == 3
-        )  # 3 assistant messages
+        assert len([m for m in recent if m["role"] == "assistant"]) == 3  # 3 assistant messages
 
         # Check that we have valid content
-        assert all(
-            "Message" in m["content"] or "Response" in m["content"] for m in recent
-        )
+        assert all("Message" in m["content"] or "Response" in m["content"] for m in recent)
 
     def test_list_sessions(self, temp_dir):
         """Test listing sessions."""
@@ -156,9 +152,7 @@ class TestConversationHistory:
         assert len(sessions) >= 2
 
         # Find our test sessions
-        test_sessions = [
-            s for s in sessions if s["title"] in ["Session 1", "Session 2"]
-        ]
+        test_sessions = [s for s in sessions if s["title"] in ["Session 1", "Session 2"]]
         assert len(test_sessions) == 2
 
         # Check message counts
@@ -175,9 +169,7 @@ class TestConversationHistory:
 
         # Add messages with searchable content
         history.add_message(session_id, "user", "How do I install Python?")
-        history.add_message(
-            session_id, "assistant", "You can download Python from python.org"
-        )
+        history.add_message(session_id, "assistant", "You can download Python from python.org")
         history.add_message(session_id, "user", "What about JavaScript?")
         history.add_message(session_id, "assistant", "JavaScript runs in browsers")
 
@@ -226,9 +218,7 @@ class TestConversationHistory:
         old_date = (datetime.now() - timedelta(days=45)).isoformat()
 
         with sqlite3.connect(history.db_path) as conn:
-            conn.execute(
-                "UPDATE sessions SET updated_at = ? WHERE id = ?", (old_date, session2)
-            )
+            conn.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (old_date, session2))
             conn.commit()
 
         # Clear old history (30 days)

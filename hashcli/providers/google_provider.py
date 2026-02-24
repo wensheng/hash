@@ -128,7 +128,7 @@ class GoogleProvider(LLMProvider):
                         if part.text:
                             if not content:  # Avoid duplicating if already streamed
                                 content += part.text
-                            
+
                             # For Gemma, parse tool calls from text
                             if self.is_gemma_model:
                                 text_tool_calls = self._parse_tool_calls_from_text(part.text)
@@ -301,12 +301,9 @@ class GoogleProvider(LLMProvider):
                             tool_id = tc.get("id")
                             if tool_id:
                                 tool_id_to_name[tool_id] = name
-                            
-                            tool_uses.append({
-                                "tool_name": name,
-                                "arguments": args
-                            })
-                        
+
+                            tool_uses.append({"tool_name": name, "arguments": args})
+
                         json_block = "```json\n" + json.dumps({"tool_uses": tool_uses}, indent=2) + "\n```"
                         parts.append(types.Part(text=json_block))
                     else:
@@ -332,7 +329,7 @@ class GoogleProvider(LLMProvider):
             elif role == "tool":
                 # Look up the function name using the tool_call_id
                 name = tool_id_to_name.get(tool_call_id)
-                
+
                 if self.is_gemma_model:
                     # For Gemma, format tool output as text
                     result_text = f"Tool Result ({name or 'unknown'}):\n{content}"
@@ -346,7 +343,9 @@ class GoogleProvider(LLMProvider):
                     else:
                         # Return proper FunctionResponse
                         response_data = {"content": content}
-                        parts = [types.Part(function_response=types.FunctionResponse(name=name, response=response_data))]
+                        parts = [
+                            types.Part(function_response=types.FunctionResponse(name=name, response=response_data))
+                        ]
                         contents.append(types.Content(role="user", parts=parts))
 
         # Merge adjacent messages of the same role if necessary
@@ -383,11 +382,14 @@ class GoogleProvider(LLMProvider):
                 desc = func.get("description")
                 params = json.dumps(func.get("parameters"), indent=2)
                 prompt += f"- Name: {name}\n  Description: {desc}\n  Parameters: {params}\n\n"
-        
+
         prompt += "TOOL USAGE INSTRUCTIONS:\n"
         prompt += "To use a tool, you MUST respond with a JSON object wrapped in markdown code blocks like this:\n"
         prompt += "```json\n"
-        prompt += '{\n  "tool_uses": [\n    {\n      "tool_name": "example_tool",\n      "arguments": {\n        "param1": "value1"\n      }\n    }\n  ]\n}\n'
+        prompt += (
+            '{\n  "tool_uses": [\n    {\n      "tool_name": "example_tool",\n      "arguments": {\n        "param1":'
+            ' "value1"\n      }\n    }\n  ]\n}\n'
+        )
         prompt += "```\n"
         prompt += "If you are not using a tool, do not output this JSON format."
         return prompt
@@ -399,7 +401,7 @@ class GoogleProvider(LLMProvider):
             # Look for JSON blocks
             json_pattern = r"```json\s*(\{.*?\})\s*```"
             matches = re.findall(json_pattern, text, re.DOTALL)
-            
+
             for match in matches:
                 try:
                     data = json.loads(match)
@@ -409,18 +411,14 @@ class GoogleProvider(LLMProvider):
                         args = use.get("arguments", {})
                         if name:
                             tool_calls.append(
-                                ToolCall(
-                                    name=name,
-                                    arguments=args,
-                                    call_id=f"call_{name}_{hash(str(args))}"
-                                )
+                                ToolCall(name=name, arguments=args, call_id=f"call_{name}_{hash(str(args))}")
                             )
                 except json.JSONDecodeError:
                     continue
-                    
+
         except Exception:
             pass
-            
+
         return tool_calls
 
     def set_model(self, model: str):

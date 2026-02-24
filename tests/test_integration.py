@@ -183,6 +183,36 @@ class TestLLMIntegration:
         assert len(messages) >= 3  # system + user1 + assistant1 + user2
 
     @pytest.mark.asyncio
+    async def test_llm_handler_shared_session_id_reuses_history(self, sample_config, temp_dir):
+        """Separate handler instances should share context when session_id matches."""
+        sample_config.history_dir = temp_dir / "history"
+        sample_config.history_enabled = True
+
+        first_provider = MagicMock()
+        first_provider.generate_response = AsyncMock(
+            return_value=LLMResponse(content="First response", tool_calls=[], model="test")
+        )
+        first_handler = LLMHandler(sample_config, session_id="shell-session-1")
+        first_handler.provider = first_provider
+        await first_handler.chat("First message")
+
+        second_provider = MagicMock()
+        second_provider.generate_response = AsyncMock(
+            return_value=LLMResponse(content="Second response", tool_calls=[], model="test")
+        )
+        second_handler = LLMHandler(sample_config, session_id="shell-session-1")
+        second_handler.provider = second_provider
+        await second_handler.chat("Second message")
+
+        second_call_args = second_provider.generate_response.call_args
+        messages = second_call_args.kwargs["messages"]
+        contents = [message.get("content", "") for message in messages]
+
+        assert any("First message" in content for content in contents)
+        assert any("First response" in content for content in contents)
+        assert any("Second message" in content for content in contents)
+
+    @pytest.mark.asyncio
     async def test_llm_handler_force_confirmation_true_overrides_config(self, sample_config, temp_dir):
         """How-to mode can force confirmation even when config disables it."""
         from hashcli.llm_handler import ToolCall
@@ -277,19 +307,17 @@ class TestCommandIntegration:
         plugin_dir.mkdir(parents=True)
         plugin_file = plugin_dir / "hello.py"
         plugin_file.write_text(
-            "\n".join(
-                [
-                    "from typing import List",
-                    "from hashcli.command_proxy import Command",
-                    "",
-                    "class HelloCommand(Command):",
-                    "    def execute(self, args: List[str]) -> str:",
-                    "        return 'hello plugin'",
-                    "",
-                    "    def get_help(self) -> str:",
-                    "        return 'hello help'",
-                ]
-            )
+            "\n".join([
+                "from typing import List",
+                "from hashcli.command_proxy import Command",
+                "",
+                "class HelloCommand(Command):",
+                "    def execute(self, args: List[str]) -> str:",
+                "        return 'hello plugin'",
+                "",
+                "    def get_help(self) -> str:",
+                "        return 'hello help'",
+            ])
             + "\n",
             encoding="utf-8",
         )
@@ -307,19 +335,17 @@ class TestCommandIntegration:
         plugin_dir.mkdir(parents=True)
         plugin_file = plugin_dir / "hello.py"
         plugin_file.write_text(
-            "\n".join(
-                [
-                    "from typing import List",
-                    "from hashcli.command_proxy import Command",
-                    "",
-                    "class HelloCommand(Command):",
-                    "    def execute(self, args: List[str]) -> str:",
-                    "        return 'hello plugin'",
-                    "",
-                    "    def get_help(self) -> str:",
-                    "        return 'hello help'",
-                ]
-            )
+            "\n".join([
+                "from typing import List",
+                "from hashcli.command_proxy import Command",
+                "",
+                "class HelloCommand(Command):",
+                "    def execute(self, args: List[str]) -> str:",
+                "        return 'hello plugin'",
+                "",
+                "    def get_help(self) -> str:",
+                "        return 'hello help'",
+            ])
             + "\n",
             encoding="utf-8",
         )
@@ -338,19 +364,17 @@ class TestCommandIntegration:
         plugin_dir.mkdir(parents=True)
         plugin_file = plugin_dir / "hello.py"
         plugin_file.write_text(
-            "\n".join(
-                [
-                    "from typing import List",
-                    "from hashcli.command_proxy import Command",
-                    "",
-                    "class HelloCommand(Command):",
-                    "    def execute(self, args: List[str]) -> str:",
-                    "        return 'hello plugin'",
-                    "",
-                    "    def get_help(self) -> str:",
-                    "        return 'hello help'",
-                ]
-            )
+            "\n".join([
+                "from typing import List",
+                "from hashcli.command_proxy import Command",
+                "",
+                "class HelloCommand(Command):",
+                "    def execute(self, args: List[str]) -> str:",
+                "        return 'hello plugin'",
+                "",
+                "    def get_help(self) -> str:",
+                "        return 'hello help'",
+            ])
             + "\n",
             encoding="utf-8",
         )

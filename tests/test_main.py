@@ -1,15 +1,19 @@
 """Unit tests for the main CLI entry point."""
 
+import hashlib
 import re
+import uuid
 
 import pytest
 from typer.testing import CliRunner
 
 from hashcli.main import (
     _build_query_execution_policy,
+    _build_shell_scope_fingerprint,
     _extract_suggested_command,
     _is_command_oriented_query,
     _normalize_shell_input,
+    _resolve_conversation_session_id,
     _strip_execute_prompt_lines,
     app,
     execute_command_mode,
@@ -95,19 +99,17 @@ def test_add_cmd_installs_valid_plugin_file(mocker, tmp_path):
     """--add-cmd should validate and install a plugin file."""
     plugin_file = tmp_path / "hello.py"
     plugin_file.write_text(
-        "\n".join(
-            [
-                "from typing import List",
-                "from hashcli.command_proxy import Command",
-                "",
-                "class HelloCommand(Command):",
-                "    def execute(self, args: List[str]) -> str:",
-                "        return 'hello world'",
-                "",
-                "    def get_help(self) -> str:",
-                "        return 'say hello'",
-            ]
-        )
+        "\n".join([
+            "from typing import List",
+            "from hashcli.command_proxy import Command",
+            "",
+            "class HelloCommand(Command):",
+            "    def execute(self, args: List[str]) -> str:",
+            "        return 'hello world'",
+            "",
+            "    def get_help(self) -> str:",
+            "        return 'say hello'",
+        ])
         + "\n",
         encoding="utf-8",
     )
@@ -137,20 +139,18 @@ def test_add_cmd_accepts_directory_with_single_plugin_file(mocker, tmp_path):
     plugin_dir.mkdir()
     plugin_file = plugin_dir / "goodbye.py"
     plugin_file.write_text(
-        "\n".join(
-            [
-                "from typing import List",
-                "from hashcli.command_proxy import Command",
-                "from hashcli.config import HashConfig",
-                "",
-                "class GoodbyeCommand(Command):",
-                "    def execute(self, args: List[str], config: HashConfig) -> str:",
-                "        return 'bye'",
-                "",
-                "    def get_help(self) -> str:",
-                "        return 'say bye'",
-            ]
-        )
+        "\n".join([
+            "from typing import List",
+            "from hashcli.command_proxy import Command",
+            "from hashcli.config import HashConfig",
+            "",
+            "class GoodbyeCommand(Command):",
+            "    def execute(self, args: List[str], config: HashConfig) -> str:",
+            "        return 'bye'",
+            "",
+            "    def get_help(self) -> str:",
+            "        return 'say bye'",
+        ])
         + "\n",
         encoding="utf-8",
     )
@@ -171,12 +171,10 @@ def test_add_cmd_rejects_plugin_without_command_subclass(mocker, tmp_path):
     """--add-cmd should fail if plugin file has no Command subclass."""
     bad_plugin = tmp_path / "bad.py"
     bad_plugin.write_text(
-        "\n".join(
-            [
-                "class NotACommand:",
-                "    pass",
-            ]
-        )
+        "\n".join([
+            "class NotACommand:",
+            "    pass",
+        ])
         + "\n",
         encoding="utf-8",
     )
@@ -274,6 +272,68 @@ def test_build_query_execution_policy_command_hint_disables_confirmation():
     assert policy.force_command_oriented is True
 
 
+def test_build_shell_scope_fingerprint_contains_parent_and_tty(mocker):
+    """Shell fingerprint should include parent PID and tty identity."""
+    mocker.patch("hashcli.main.os.getppid", return_value=12345)
+    mocker.patch("hashcli.main._get_active_tty", return_value="/dev/pts/4")
+    mocker.patch.dict(
+        "hashcli.main.os.environ",
+        {
+            "TMUX": "tmux-1",
+            "STY": "",
+            "TERM_SESSION_ID": "term-session",
+            "WT_SESSION": "",
+            "TERM_PROGRAM": "iTerm.app",
+        },
+        clear=True,
+    )
+
+    fingerprint = _build_shell_scope_fingerprint()
+
+    assert fingerprint.startswith("12345|/dev/pts/4|")
+    assert "term-session" in fingerprint
+    assert "iTerm.app" in fingerprint
+
+
+def test_resolve_conversation_session_id_prefers_env_var(mocker):
+    """Explicit HASHCLI_SESSION_ID should remain the highest-priority source."""
+    mocker.patch.dict("hashcli.main.os.environ", {"HASHCLI_SESSION_ID": "env-session"}, clear=True)
+    assert _resolve_conversation_session_id() == "env-session"
+
+
+def test_resolve_conversation_session_id_noninteractive_returns_none(mocker):
+    """Non-interactive invocation should keep one-shot behavior by default."""
+    mocker.patch.dict("hashcli.main.os.environ", {}, clear=True)
+    mocker.patch("hashcli.main._is_interactive_session", return_value=False)
+    assert _resolve_conversation_session_id() is None
+
+
+def test_resolve_conversation_session_id_interactive_is_stable(mocker):
+    """Interactive shell invocations without env should map to a stable shell session id."""
+    mocker.patch.dict("hashcli.main.os.environ", {}, clear=True)
+    mocker.patch("hashcli.main._is_interactive_session", return_value=True)
+    mocker.patch("hashcli.main._build_shell_scope_fingerprint", return_value="ppid|tty|session")
+
+    first = _resolve_conversation_session_id()
+    second = _resolve_conversation_session_id()
+
+    expected = "shell-" + hashlib.sha256("ppid|tty|session".encode("utf-8")).hexdigest()[:24]
+    assert first == expected
+    assert second == expected
+
+
+def test_resolve_conversation_session_id_new_session_overrides_existing(mocker):
+    """--new-session should force a fresh session id even when env id exists."""
+    forced_uuid = uuid.UUID("11111111-2222-3333-4444-555555555555")
+    mocker.patch.dict("hashcli.main.os.environ", {"HASHCLI_SESSION_ID": "env-session"}, clear=True)
+    mocker.patch("hashcli.main.uuid.uuid4", return_value=forced_uuid)
+
+    resolved = _resolve_conversation_session_id(new_session=True)
+
+    assert resolved == str(forced_uuid)
+    assert resolved != "env-session"
+
+
 def test_extract_suggested_command_ignores_general_knowledge_prose():
     """Natural-language answers should not trigger command execution prompts."""
     response = "More sensitive to blue wavelengths makes the sky appear blue."
@@ -288,10 +348,7 @@ def test_extract_suggested_command_from_explicit_confirmation_line():
 
 def test_extract_suggested_command_prefers_latest_explicit_execute_line():
     """When multiple execute lines exist, prefer the latest explicit recommendation."""
-    response = (
-        "do you want execute `echo {5..20}`?\n"
-        "Would you like me to execute `seq 5 20` to show you the output?"
-    )
+    response = "do you want execute `echo {5..20}`?\nWould you like me to execute `seq 5 20` to show you the output?"
     assert _extract_suggested_command(response, user_query="how to print natural number from 5 to 20") == "seq 5 20"
 
 
@@ -355,6 +412,23 @@ def test_main_routes_embedded_hash_to_enhanced_llm_mode(mocker):
     assert call_kwargs["force_command_oriented"] is True
 
 
+def test_main_new_session_routes_with_new_session_id(mocker):
+    """--new-session should resolve and forward a fresh session id."""
+    config = HashConfig()
+    mocker.patch("hashcli.main.load_configuration", return_value=config)
+    mocker.patch("hashcli.main.validate_api_setup")
+    mock_resolve = mocker.patch("hashcli.main._resolve_conversation_session_id", return_value="new-session-id")
+    llm_mode = mocker.Mock(return_value=None)
+    mocker.patch("hashcli.main.execute_llm_mode", llm_mode)
+    mocker.patch("hashcli.main.asyncio.run")
+
+    result = runner.invoke(app, ["--new-session", "hello"])
+
+    assert result.exit_code == 0
+    mock_resolve.assert_called_once_with(new_session=True)
+    assert llm_mode.call_args.kwargs["session_id"] == "new-session-id"
+
+
 @pytest.mark.asyncio
 async def test_llm_mode_execution(mocker):
     """Test LLM chat mode."""
@@ -366,6 +440,21 @@ async def test_llm_mode_execution(mocker):
 
     config = HashConfig()
     await execute_llm_mode("hello", config)
+    mock_chat.assert_awaited_with("hello")
+
+
+@pytest.mark.asyncio
+async def test_llm_mode_passes_session_id_to_handler(mocker):
+    """Resolved session id should be passed into handler construction."""
+    mock_chat = mocker.AsyncMock(return_value="llm output")
+    mock_handler = mocker.patch("hashcli.main.LLMHandler")
+    mock_instance = mock_handler.return_value
+    mock_instance.chat = mock_chat
+
+    config = HashConfig()
+    await execute_llm_mode("hello", config, quiet=True, session_id="shell-session-id")
+
+    mock_handler.assert_called_once_with(config, session_id="shell-session-id")
     mock_chat.assert_awaited_with("hello")
 
 

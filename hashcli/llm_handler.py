@@ -1,6 +1,7 @@
 """LLM handler with provider abstraction and tool calling capabilities."""
 
 import json
+import os
 from typing import Any, Callable, Dict, List, Optional
 
 from rich.prompt import Confirm
@@ -44,11 +45,11 @@ class LLMResponse:
 class LLMHandler:
     """Main LLM handler that manages providers and tool calling."""
 
-    def __init__(self, config: HashConfig):
+    def __init__(self, config: HashConfig, session_id: Optional[str] = None):
         self.config = config
         self.provider = self._get_provider()
         self.history = ConversationHistory(config.history_dir) if config.history_enabled else None
-        self.current_session_id = None
+        self.current_session_id = session_id or os.environ.get("HASHCLI_SESSION_ID")
         self.last_tool_calls_executed = False
 
     async def chat(
@@ -61,8 +62,11 @@ class LLMHandler:
         try:
             self.last_tool_calls_executed = False
             # Start new session if needed
-            if self.history and not self.current_session_id:
-                self.current_session_id = self.history.start_session()
+            if self.history:
+                if not self.current_session_id:
+                    self.current_session_id = self.history.start_session()
+                elif self.history.get_session_info(self.current_session_id) is None:
+                    self.history.start_session(session_id=self.current_session_id)
 
             # Add user message to history
             if self.history:

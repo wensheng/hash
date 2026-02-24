@@ -25,16 +25,14 @@ def test_format_messages_tool_cycle(google_config):
         {
             "role": "assistant",
             "content": "",
-            "tool_calls": [
-                {
-                    "id": "call_123",
-                    "type": "function",
-                    "function": {
-                        "name": "execute_shell_command",
-                        "arguments": '{"command": "date", "description": "check time"}',
-                    },
-                }
-            ],
+            "tool_calls": [{
+                "id": "call_123",
+                "type": "function",
+                "function": {
+                    "name": "execute_shell_command",
+                    "arguments": '{"command": "date", "description": "check time"}',
+                },
+            }],
         },
         {"role": "tool", "content": "Sun Feb  1 12:00:00 UTC 2026", "tool_call_id": "call_123"},
     ]
@@ -66,22 +64,18 @@ def test_format_messages_mixed_content(google_config):
     """Test formatting of assistant message with both text and tool calls."""
     provider = GoogleProvider(google_config)
 
-    messages = [
-        {
-            "role": "assistant",
-            "content": "I will check the time.",
-            "tool_calls": [
-                {
-                    "id": "call_456",
-                    "type": "function",
-                    "function": {
-                        "name": "read_file",
-                        "arguments": '{"file_path": "test.txt"}',
-                    },
-                }
-            ],
-        }
-    ]
+    messages = [{
+        "role": "assistant",
+        "content": "I will check the time.",
+        "tool_calls": [{
+            "id": "call_456",
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "arguments": '{"file_path": "test.txt"}',
+            },
+        }],
+    }]
 
     formatted = provider._format_messages_for_provider(messages)
 
@@ -97,26 +91,26 @@ async def test_generate_response_disables_function_calling_for_how_to(google_con
     """How-to prompts should disable Gemini function calling mode."""
     provider = GoogleProvider(google_config)
     response = SimpleNamespace(
-        candidates=[SimpleNamespace(content=SimpleNamespace(parts=[SimpleNamespace(text="Use find", function_call=None)]))],
+        candidates=[
+            SimpleNamespace(content=SimpleNamespace(parts=[SimpleNamespace(text="Use find", function_call=None)]))
+        ],
         usage_metadata=None,
     )
     generate_content = mocker.AsyncMock(return_value=response)
     mocker.patch.object(provider.client.aio.models, "generate_content", generate_content)
 
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "execute_shell_command",
-                "description": "Execute shell command",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"command": {"type": "string"}, "description": {"type": "string"}},
-                    "required": ["command", "description"],
-                },
+    tools = [{
+        "type": "function",
+        "function": {
+            "name": "execute_shell_command",
+            "description": "Execute shell command",
+            "parameters": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}, "description": {"type": "string"}},
+                "required": ["command", "description"],
             },
-        }
-    ]
+        },
+    }]
 
     await provider.generate_response(
         messages=[{"role": "user", "content": "how to find all __pycache__ directories"}],
@@ -133,26 +127,26 @@ async def test_generate_response_keeps_function_calling_auto_for_action_request(
     """Action prompts should keep default function calling behavior."""
     provider = GoogleProvider(google_config)
     response = SimpleNamespace(
-        candidates=[SimpleNamespace(content=SimpleNamespace(parts=[SimpleNamespace(text="Running", function_call=None)]))],
+        candidates=[
+            SimpleNamespace(content=SimpleNamespace(parts=[SimpleNamespace(text="Running", function_call=None)]))
+        ],
         usage_metadata=None,
     )
     generate_content = mocker.AsyncMock(return_value=response)
     mocker.patch.object(provider.client.aio.models, "generate_content", generate_content)
 
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "execute_shell_command",
-                "description": "Execute shell command",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"command": {"type": "string"}, "description": {"type": "string"}},
-                    "required": ["command", "description"],
-                },
+    tools = [{
+        "type": "function",
+        "function": {
+            "name": "execute_shell_command",
+            "description": "Execute shell command",
+            "parameters": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}, "description": {"type": "string"}},
+                "required": ["command", "description"],
             },
-        }
-    ]
+        },
+    }]
 
     await provider.generate_response(
         messages=[{"role": "user", "content": "find all __pycache__ directories"}],

@@ -11,11 +11,14 @@ if __name__ == "__main__" and __package__ is None:
 
 
 import asyncio
+import hashlib
 import os
 import re
 import shlex
 import shutil
 import subprocess
+import sys
+import uuid
 from dataclasses import dataclass
 from typing import Optional
 from pathlib import Path
@@ -130,6 +133,55 @@ def _build_query_execution_policy(
     )
 
 
+def _is_interactive_session() -> bool:
+    """Return True when invoked from an interactive terminal session."""
+    try:
+        return sys.stdin.isatty()
+    except Exception:
+        return False
+
+
+def _get_active_tty() -> str:
+    """Get best-effort TTY name across stdio streams."""
+    for fd in (0, 1, 2):
+        try:
+            if os.isatty(fd):
+                return os.ttyname(fd)
+        except Exception:
+            continue
+    return "no-tty"
+
+
+def _build_shell_scope_fingerprint() -> str:
+    """Build a stable fingerprint representing the current shell session."""
+    env_markers = [
+        os.environ.get("TMUX", ""),
+        os.environ.get("STY", ""),
+        os.environ.get("TERM_SESSION_ID", ""),
+        os.environ.get("WT_SESSION", ""),
+        os.environ.get("TERM_PROGRAM", ""),
+    ]
+    parts = [str(os.getppid()), _get_active_tty(), *env_markers]
+    return "|".join(parts)
+
+
+def _resolve_conversation_session_id(new_session: bool = False) -> Optional[str]:
+    """Resolve conversation session id for this invocation."""
+    if new_session:
+        return str(uuid.uuid4())
+
+    existing_session_id = os.environ.get("HASHCLI_SESSION_ID", "").strip()
+    if existing_session_id:
+        return existing_session_id
+
+    if not _is_interactive_session():
+        return None
+
+    fingerprint = _build_shell_scope_fingerprint()
+    digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:24]
+    return f"shell-{digest}"
+
+
 def _resolve_add_cmd_source(add_cmd_value: str) -> Path:
     """Resolve --add-cmd input to a Python plugin file."""
     source_path = Path(add_cmd_value).expanduser()
@@ -158,8 +210,7 @@ def _resolve_add_cmd_source(add_cmd_value: str) -> Path:
 
         candidates = ", ".join(path.name for path in python_files)
         raise ValueError(
-            "Directory contains multiple Python files. "
-            f"Provide a specific plugin file path. Candidates: {candidates}"
+            f"Directory contains multiple Python files. Provide a specific plugin file path. Candidates: {candidates}"
         )
 
     raise ValueError(f"Invalid plugin source path: {source_path}")
@@ -168,7 +219,6 @@ def _resolve_add_cmd_source(add_cmd_value: str) -> Path:
 def _install_plugin_from_path(add_cmd_value: str) -> Tuple[str, Path, str]:
     """Validate and install a third-party slash-command plugin."""
     source_file = _resolve_add_cmd_source(add_cmd_value)
-    command_class = load_command_class_from_file(source_file)
 
     plugin_dir = get_user_plugin_directory()
     plugin_dir.mkdir(parents=True, exist_ok=True)
@@ -489,9 +539,7 @@ def _extract_suggested_command(
 
         return " ".join(quote_part(part) for part in normalized)
 
-    def add_candidate(
-        candidate: str, source: str, position: int = 0, normalize: bool = True
-    ) -> Optional[dict]:
+    def add_candidate(candidate: str, source: str, position: int = 0, normalize: bool = True) -> Optional[dict]:
         cleaned = clean_command(candidate)
         if not is_probable_command(cleaned):
             return None
@@ -538,9 +586,7 @@ def _extract_suggested_command(
     )
     for pattern in explicit_patterns:
         for match in re.finditer(pattern, response_text, re.IGNORECASE):
-            item = add_candidate(
-                match.group(1), "explicit", match.start(), normalize=False
-            )
+            item = add_candidate(match.group(1), "explicit", match.start(), normalize=False)
             if item:
                 candidates.append(item)
 
@@ -858,6 +904,11 @@ def main(
         help="Override LLM provider (openai, anthropic, google)",
     ),
     no_confirm: bool = typer.Option(False, "--no-confirm", "-y", help="Skip confirmation prompts for tool calls"),
+    new_session: bool = typer.Option(
+        False,
+        "--new-session",
+        help="Start a new conversation session for this invocation.",
+    ),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Minimize output, show only results"),
     version: Optional[bool] = typer.Option(
         None,
@@ -942,11 +993,13 @@ def main(
         if input_text.startswith("/"):
             execute_command_mode(input_text, config, quiet)
         else:
+            session_id = _resolve_conversation_session_id(new_session=new_session)
             asyncio.run(
                 execute_llm_mode(
                     input_text,
                     config,
                     quiet,
+                    session_id=session_id,
                     force_tool_confirmation=query_policy.force_tool_confirmation,
                     suggested_command_confirmation=query_policy.suggested_command_confirmation,
                     force_command_oriented=query_policy.force_command_oriented,
@@ -980,12 +1033,16 @@ async def execute_llm_mode(
     input_text: str,
     config,
     quiet: bool = False,
+    session_id: Optional[str] = None,
     force_tool_confirmation: Optional[bool] = None,
     suggested_command_confirmation: bool = True,
     force_command_oriented: bool = False,
 ):
     """Execute query in LLM chat mode."""
-    handler = LLMHandler(config)
+    if session_id:
+        handler = LLMHandler(config, session_id=session_id)
+    else:
+        handler = LLMHandler(config)
 
     if config.streaming:
         streamed_output = {"emitted": False, "buffer": [], "line_buffer": ""}

@@ -34,15 +34,11 @@ class TestHashConfig:
     def test_get_current_model(self):
         """Test getting current model for different providers."""
         # OpenAI
-        config = HashConfig(
-            llm_provider=LLMProvider.OPENAI, openai_model="gpt-3.5-turbo"
-        )
+        config = HashConfig(llm_provider=LLMProvider.OPENAI, openai_model="gpt-3.5-turbo")
         assert config.get_current_model() == "gpt-3.5-turbo"
 
         # Anthropic
-        config = HashConfig(
-            llm_provider=LLMProvider.ANTHROPIC, anthropic_model="claude-3-sonnet"
-        )
+        config = HashConfig(llm_provider=LLMProvider.ANTHROPIC, anthropic_model="claude-3-sonnet")
         assert config.get_current_model() == "claude-3-sonnet"
 
         # Google
@@ -52,15 +48,11 @@ class TestHashConfig:
     def test_get_current_api_key(self):
         """Test getting current API key for different providers."""
         # OpenAI
-        config = HashConfig(
-            llm_provider=LLMProvider.OPENAI, openai_api_key="openai-key"
-        )
+        config = HashConfig(llm_provider=LLMProvider.OPENAI, openai_api_key="openai-key")
         assert config.get_current_api_key() == "openai-key"
 
         # Anthropic
-        config = HashConfig(
-            llm_provider=LLMProvider.ANTHROPIC, anthropic_api_key="anthropic-key"
-        )
+        config = HashConfig(llm_provider=LLMProvider.ANTHROPIC, anthropic_api_key="anthropic-key")
         assert config.get_current_api_key() == "anthropic-key"
 
     def test_validate_current_setup(self):
@@ -180,13 +172,11 @@ class TestConfigurationLoading:
 
         config_path = temp_dir / "config.toml"
         config_path.write_text(
-            "\n".join(
-                [
-                    'openai_api_key = "file-openai-key"',
-                    'anthropic_api_key = "file-anthropic-key"',
-                    'google_api_key = "file-google-key"',
-                ]
-            )
+            "\n".join([
+                'openai_api_key = "file-openai-key"',
+                'anthropic_api_key = "file-anthropic-key"',
+                'google_api_key = "file-google-key"',
+            ])
             + "\n",
             encoding="utf-8",
         )
