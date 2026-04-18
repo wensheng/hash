@@ -1,6 +1,10 @@
 # Hash CLI Integration for PowerShell
 # Requires PowerShell 5.1+ or PowerShell Core 7+
 
+if (-not (Test-Path Env:HASHCLI_SESSION_ID)) {
+    [Environment]::SetEnvironmentVariable("HASHCLI_SESSION_ID", [guid]::NewGuid().ToString(), "Process")
+}
+
 # Check if PSReadLine module is available
 if (-not (Get-Module -ListAvailable PSReadLine)) {
     Write-Warning "PSReadLine module is required for Hash integration"

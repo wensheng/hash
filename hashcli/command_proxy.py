@@ -3,7 +3,6 @@
 import importlib.util
 import inspect
 import shlex
-import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, List, Optional, Type
@@ -151,11 +150,7 @@ class CommandProxy:
         ]
         has_var_positional = any(param.kind == inspect.Parameter.VAR_POSITIONAL for param in parameters)
         keyword_only_config = next(
-            (
-                param
-                for param in parameters
-                if param.kind == inspect.Parameter.KEYWORD_ONLY and param.name == "config"
-            ),
+            (param for param in parameters if param.kind == inspect.Parameter.KEYWORD_ONLY and param.name == "config"),
             None,
         )
 
@@ -186,8 +181,7 @@ class CommandProxy:
                 if command_name in commands:
                     if self.config.show_debug:
                         console.print(
-                            f"[yellow]Skipping plugin '{plugin_file.name}': "
-                            f"/{command_name} already exists.[/yellow]"
+                            f"[yellow]Skipping plugin '{plugin_file.name}': /{command_name} already exists.[/yellow]"
                         )
                     continue
 

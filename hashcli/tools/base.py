@@ -43,18 +43,12 @@ class Tool(ABC):
 
 def get_tool_executor(tool_name: str) -> Optional[Tool]:
     """Get tool executor by name."""
-    from .code_analysis import CodeAnalysisTool
-    from .filesystem import FileSystemTool
     from .shell import ShellTool
-    from .web_search import WebSearchTool
+    from ..tldr import TLDRTool
 
     tools = {
         "execute_shell_command": ShellTool(),
-        "read_file": FileSystemTool(),
-        "write_file": FileSystemTool(),
-        "list_directory": FileSystemTool(),
-        "web_search": WebSearchTool(),
-        "analyze_code": CodeAnalysisTool(),
+        "lookup_tldr_command": TLDRTool(),
     }
 
     return tools.get(tool_name)

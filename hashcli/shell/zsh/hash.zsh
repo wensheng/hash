@@ -2,6 +2,10 @@
 # Hash CLI Integration for zsh
 # This script enables interception for any command line containing #
 
+if [[ -z "$HASHCLI_SESSION_ID" ]]; then
+    export HASHCLI_SESSION_ID=$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || echo "$$-$(date +%s)")
+fi
+
 # Create hash-magic-execute widget
 hash-magic-execute() {
     # Ignore lines containing '##' by executing only the part before it.

@@ -1,6 +1,8 @@
 """LLM handler with provider abstraction and tool calling capabilities."""
 
 import json
+import os
+import re
 from typing import Any, Callable, Dict, List, Optional
 
 from rich.prompt import Confirm
@@ -44,11 +46,11 @@ class LLMResponse:
 class LLMHandler:
     """Main LLM handler that manages providers and tool calling."""
 
-    def __init__(self, config: HashConfig):
+    def __init__(self, config: HashConfig, session_id: Optional[str] = None):
         self.config = config
         self.provider = self._get_provider()
         self.history = ConversationHistory(config.history_dir) if config.history_enabled else None
-        self.current_session_id = None
+        self.current_session_id = session_id or os.environ.get("HASHCLI_SESSION_ID")
         self.last_tool_calls_executed = False
 
     async def chat(
@@ -61,8 +63,11 @@ class LLMHandler:
         try:
             self.last_tool_calls_executed = False
             # Start new session if needed
-            if self.history and not self.current_session_id:
-                self.current_session_id = self.history.start_session()
+            if self.history:
+                if not self.current_session_id:
+                    self.current_session_id = self.history.start_session()
+                elif self.history.get_session_info(self.current_session_id) is None:
+                    self.history.start_session(session_id=self.current_session_id)
 
             # Add user message to history
             if self.history:
@@ -70,11 +75,12 @@ class LLMHandler:
 
             # Get conversation context
             context_messages = self._get_conversation_context()
+            available_tools = self._get_available_tools(message)
 
             # Get LLM response
             response = await self.provider.generate_response(
                 messages=context_messages,
-                tools=self._get_available_tools(),
+                tools=available_tools,
                 stream_handler=stream_handler if self.config.streaming else None,
             )
 
@@ -84,6 +90,7 @@ class LLMHandler:
                 response = await self._handle_tool_calls(
                     response,
                     context_messages,
+                    available_tools,
                     stream_handler,
                     force_tool_confirmation=force_tool_confirmation,
                 )
@@ -131,12 +138,45 @@ class LLMHandler:
 
         return messages
 
-    def _get_available_tools(self) -> List[Dict[str, Any]]:
+    def _get_available_tools(self, user_message: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get list of available tools for the LLM."""
-        tools = []
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup_tldr_command",
+                    "description": (
+                        "Look up concise tldr examples and usage notes for a shell command. "
+                        "Use this when answering command-specific questions and you need grounded syntax or examples."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": "The command to look up, such as tar, find, or xargs.",
+                            },
+                            "platform": {
+                                "type": ["string", "null"],
+                                "description": "Optional platform override such as linux, osx, or windows.",
+                            },
+                            "language": {
+                                "type": ["string", "null"],
+                                "description": "Optional language override for tldr lookup.",
+                            },
+                            "search": {
+                                "type": "boolean",
+                                "description": "Set to true to search commands by keyword instead of looking up one exact command.",
+                            },
+                        },
+                        "required": ["command", "platform", "language", "search"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        ]
 
-        # Shell command execution tool
-        if self.config.allow_command_execution:
+        if self.config.allow_command_execution and self._should_expose_shell_tool(user_message):
             tools.append({
                 "type": "function",
                 "function": {
@@ -160,102 +200,28 @@ class LLMHandler:
                 },
             })
 
-        # File system operations
-        tools.extend([
-            {
-                "type": "function",
-                "function": {
-                    "name": "read_file",
-                    "description": "Read the contents of a text file",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "file_path": {
-                                "type": "string",
-                                "description": "Path to the file to read",
-                            }
-                        },
-                        "required": ["file_path"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "write_file",
-                    "description": "Write content to a text file",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "file_path": {
-                                "type": "string",
-                                "description": "Path to the file to write",
-                            },
-                            "content": {
-                                "type": "string",
-                                "description": "Content to write to the file",
-                            },
-                        },
-                        "required": ["file_path", "content"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "list_directory",
-                    "description": "List contents of a directory",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "directory_path": {
-                                "type": "string",
-                                "description": "Path to the directory to list",
-                            },
-                            "show_hidden": {
-                                "type": "boolean",
-                                "description": "Whether to show hidden files",
-                                "default": False,
-                            },
-                        },
-                        "required": ["directory_path", "show_hidden"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "web_search",
-                    "description": "Search the web for current information",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "The search query",
-                            },
-                            "num_results": {
-                                "type": "integer",
-                                "description": "Number of results to return",
-                                "default": 5,
-                            },
-                        },
-                        "required": ["query", "num_results"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
-        ])
-
         return tools
+
+    def _should_expose_shell_tool(self, user_message: Optional[str]) -> bool:
+        """Hide direct execution for explanatory command-help queries."""
+        if not user_message:
+            return True
+
+        normalized = user_message.strip().lower()
+        if not normalized:
+            return True
+
+        explanatory_patterns = (
+            r"^(how to|how do i|how can i|what command|which command)\b",
+            r"^(explain|what does|how does)\b",
+        )
+        return not any(re.match(pattern, normalized) for pattern in explanatory_patterns)
 
     async def _handle_tool_calls(
         self,
         response: LLMResponse,
         context_messages: List[Dict[str, str]],
+        available_tools: List[Dict[str, Any]],
         stream_handler: Optional[Callable[[str], None]] = None,
         force_tool_confirmation: Optional[bool] = None,
     ) -> LLMResponse:
@@ -345,7 +311,7 @@ class LLMHandler:
 
             current_response = await self.provider.generate_response(
                 messages_with_tools,
-                tools=self._get_available_tools(),
+                tools=available_tools,
                 stream_handler=stream_handler if self.config.streaming else None,
             )
 

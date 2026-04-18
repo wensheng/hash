@@ -4,7 +4,6 @@ from unittest.mock import patch, MagicMock
 
 from hashcli.command_proxy import Command, CommandProxy
 from hashcli.commands.help import HelpCommand
-from plugins.tldr import TLDRCommand
 
 
 class TestCommandProxy:
@@ -79,9 +78,7 @@ class TestCommandProxy:
         proxy = CommandProxy(sample_config)
 
         # Mock a command that raises an exception
-        with patch.object(
-            proxy.commands["help"], "execute", side_effect=Exception("Test error")
-        ):
+        with patch.object(proxy.commands["help"], "execute", side_effect=Exception("Test error")):
             result = proxy.execute("/help")
             assert "Command execution error" in result
 
@@ -134,20 +131,18 @@ class TestHelpCommand:
         plugin_dir.mkdir(parents=True)
         plugin_file = plugin_dir / "hello.py"
         plugin_file.write_text(
-            "\n".join(
-                [
-                    "from typing import List",
-                    "from hashcli.command_proxy import Command",
-                    "from hashcli.config import HashConfig",
-                    "",
-                    "class HelloCommand(Command):",
-                    "    def execute(self, args: List[str], config: HashConfig) -> str:",
-                    "        return 'hello'",
-                    "",
-                    "    def get_help(self) -> str:",
-                    "        return 'hello help'",
-                ]
-            )
+            "\n".join([
+                "from typing import List",
+                "from hashcli.command_proxy import Command",
+                "from hashcli.config import HashConfig",
+                "",
+                "class HelloCommand(Command):",
+                "    def execute(self, args: List[str], config: HashConfig) -> str:",
+                "        return 'hello'",
+                "",
+                "    def get_help(self) -> str:",
+                "        return 'hello help'",
+            ])
             + "\n",
             encoding="utf-8",
         )

@@ -10,6 +10,7 @@ from hashcli.config import (
     LLMProvider,
     load_configuration,
     save_config,
+    update_config_values,
     get_config_paths,
     load_environment_variables,
 )
@@ -34,15 +35,11 @@ class TestHashConfig:
     def test_get_current_model(self):
         """Test getting current model for different providers."""
         # OpenAI
-        config = HashConfig(
-            llm_provider=LLMProvider.OPENAI, openai_model="gpt-3.5-turbo"
-        )
+        config = HashConfig(llm_provider=LLMProvider.OPENAI, openai_model="gpt-3.5-turbo")
         assert config.get_current_model() == "gpt-3.5-turbo"
 
         # Anthropic
-        config = HashConfig(
-            llm_provider=LLMProvider.ANTHROPIC, anthropic_model="claude-3-sonnet"
-        )
+        config = HashConfig(llm_provider=LLMProvider.ANTHROPIC, anthropic_model="claude-3-sonnet")
         assert config.get_current_model() == "claude-3-sonnet"
 
         # Google
@@ -52,15 +49,11 @@ class TestHashConfig:
     def test_get_current_api_key(self):
         """Test getting current API key for different providers."""
         # OpenAI
-        config = HashConfig(
-            llm_provider=LLMProvider.OPENAI, openai_api_key="openai-key"
-        )
+        config = HashConfig(llm_provider=LLMProvider.OPENAI, openai_api_key="openai-key")
         assert config.get_current_api_key() == "openai-key"
 
         # Anthropic
-        config = HashConfig(
-            llm_provider=LLMProvider.ANTHROPIC, anthropic_api_key="anthropic-key"
-        )
+        config = HashConfig(llm_provider=LLMProvider.ANTHROPIC, anthropic_api_key="anthropic-key")
         assert config.get_current_api_key() == "anthropic-key"
 
     def test_validate_current_setup(self):
@@ -180,13 +173,11 @@ class TestConfigurationLoading:
 
         config_path = temp_dir / "config.toml"
         config_path.write_text(
-            "\n".join(
-                [
-                    'openai_api_key = "file-openai-key"',
-                    'anthropic_api_key = "file-anthropic-key"',
-                    'google_api_key = "file-google-key"',
-                ]
-            )
+            "\n".join([
+                'openai_api_key = "file-openai-key"',
+                'anthropic_api_key = "file-anthropic-key"',
+                'google_api_key = "file-google-key"',
+            ])
             + "\n",
             encoding="utf-8",
         )
@@ -196,6 +187,39 @@ class TestConfigurationLoading:
         assert config.openai_api_key == "env-openai-key"
         assert config.anthropic_api_key == "env-anthropic-key"
         assert config.google_api_key == "env-google-key"
+
+    def test_update_config_values_preserves_comments_and_unrelated_settings(self, temp_dir):
+        """Targeted config updates should not rewrite unrelated settings or strip comments."""
+        config_path = temp_dir / "config.toml"
+        config_path.write_text(
+            "\n".join([
+                "# user note",
+                'streaming = true',
+                'openai_model = "old-model"',
+                'openai_api_key = "old-key"',
+                '# another note',
+            ])
+            + "\n",
+            encoding="utf-8",
+        )
+
+        success = update_config_values(
+            {
+                "llm_provider": "openai",
+                "openai_model": "gpt-5-mini",
+                "openai_api_key": "new-key",
+            },
+            config_path=config_path,
+        )
+
+        assert success is True
+        content = config_path.read_text(encoding="utf-8")
+        assert "# user note" in content
+        assert "# another note" in content
+        assert "streaming = true" in content
+        assert 'openai_model = "gpt-5-mini"' in content
+        assert 'openai_api_key = "new-key"' in content
+        assert 'llm_provider = "openai"' in content
 
 
 class TestProviderEnum:

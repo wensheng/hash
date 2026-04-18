@@ -1,4 +1,9 @@
 # Hash integration for fish shell
+
+if not set -q HASHCLI_SESSION_ID
+    set -gx HASHCLI_SESSION_ID (uuidgen 2>/dev/null; or python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null; or echo "$fish_pid-(date +%s)")
+end
+
 function hash_magic_execute --description "Execute hash commands for lines containing #"
     set -l current_buffer (commandline)
 

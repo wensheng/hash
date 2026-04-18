@@ -36,9 +36,7 @@ def sample_config():
 def mock_llm_provider():
     """Create a mock LLM provider for testing."""
     provider = MagicMock()
-    provider.generate_response.return_value = MagicMock(
-        content="Test response", tool_calls=[], model="test-model"
-    )
+    provider.generate_response.return_value = MagicMock(content="Test response", tool_calls=[], model="test-model")
     return provider
 
 

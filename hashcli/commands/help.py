@@ -41,10 +41,7 @@ CORE COMMANDS:
             for cmd in plugins:
                 help_text += f"\n  /{cmd:<26}"
         else:
-            help_text += (
-                "\n\nPLUGINS:\n"
-                "  None installed. Install with `hashcli --add-cmd <path-to-plugin>`."
-            )
+            help_text += "\n\nPLUGINS:\n  None installed. Install with `hashcli --add-cmd <path-to-plugin>`."
 
         help_text += """
 
