@@ -19,6 +19,7 @@ def google_config():
 def test_format_messages_tool_cycle(google_config):
     """Test formatting of a conversation with tool calls and results."""
     provider = GoogleProvider(google_config)
+    thought_signature = b"sig-123"
 
     messages = [
         {"role": "user", "content": "What time is it?"},
@@ -27,6 +28,8 @@ def test_format_messages_tool_cycle(google_config):
             "content": "",
             "tool_calls": [{
                 "id": "call_123",
+                "thought": True,
+                "thought_signature": thought_signature,
                 "type": "function",
                 "function": {
                     "name": "execute_shell_command",
@@ -50,8 +53,11 @@ def test_format_messages_tool_cycle(google_config):
     # Note: Depending on my implementation, content might be empty so parts might only contain function_call
     assert len(formatted[1].parts) == 1
     assert formatted[1].parts[0].function_call is not None
+    assert formatted[1].parts[0].function_call.id == "call_123"
     assert formatted[1].parts[0].function_call.name == "execute_shell_command"
     assert formatted[1].parts[0].function_call.args["command"] == "date"
+    assert formatted[1].parts[0].thought is True
+    assert formatted[1].parts[0].thought_signature == thought_signature
 
     # 3. Tool (User) message with function response
     assert formatted[2].role == "user"
@@ -158,6 +164,45 @@ async def test_generate_response_keeps_function_calling_auto_for_action_request(
 
 
 @pytest.mark.asyncio
+async def test_generate_response_preserves_thought_signature_in_tool_metadata(google_config, mocker):
+    """Native Gemini function calls should retain thought-signature metadata for follow-up turns."""
+    provider = GoogleProvider(google_config)
+    response = SimpleNamespace(
+        candidates=[
+            SimpleNamespace(
+                content=SimpleNamespace(
+                    parts=[
+                        SimpleNamespace(
+                            text=None,
+                            thought=True,
+                            thought_signature=b"sig-456",
+                            function_call=SimpleNamespace(
+                                id="fc-1",
+                                name="lookup_tldr_command",
+                                args={"command": "tar", "platform": None, "language": None, "search": False},
+                            ),
+                        )
+                    ]
+                )
+            )
+        ],
+        usage_metadata=None,
+    )
+    generate_content = mocker.AsyncMock(return_value=response)
+    mocker.patch.object(provider.client.aio.models, "generate_content", generate_content)
+
+    result = await provider.generate_response(
+        messages=[{"role": "user", "content": "show me tar examples"}],
+        tools=[],
+    )
+
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].call_id == "fc-1"
+    assert result.tool_calls[0].metadata["thought"] is True
+    assert result.tool_calls[0].metadata["thought_signature"] == b"sig-456"
+
+
+@pytest.mark.asyncio
 async def test_generate_response_keeps_tldr_lookup_enabled_for_how_to(google_config, mocker):
     """How-to prompts may still use tool calling when tldr lookup is the only tool."""
     provider = GoogleProvider(google_config)
@@ -190,3 +235,48 @@ async def test_generate_response_keeps_tldr_lookup_enabled_for_how_to(google_con
 
     config = generate_content.call_args.kwargs["config"]
     assert config.tool_config is None
+
+
+def test_clean_parameter_schema_nullable_and_uppercase(google_config):
+    """Test that _clean_parameter_schema handles nullable types and converts to uppercase."""
+    provider = GoogleProvider(google_config)
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string"},
+            "platform": {"type": ["string", "null"]},
+            "language": {"type": ["string", "null"]},
+            "count": {"type": "integer"},
+            "nested": {
+                "type": "object",
+                "properties": {
+                    "tags": {"type": "array", "items": {"type": "string"}}
+                }
+            }
+        },
+        "required": ["command", "platform", "language", "count"],
+        "additionalProperties": False,
+    }
+
+    cleaned = provider._clean_parameter_schema(schema)
+
+    assert cleaned["type"] == "OBJECT"
+    assert cleaned["properties"]["command"]["type"] == "STRING"
+    assert cleaned["properties"]["platform"]["type"] == "STRING"
+    assert cleaned["properties"]["language"]["type"] == "STRING"
+    assert cleaned["properties"]["count"]["type"] == "INTEGER"
+    assert cleaned["properties"]["nested"]["type"] == "OBJECT"
+    assert cleaned["properties"]["nested"]["properties"]["tags"]["type"] == "ARRAY"
+    assert cleaned["properties"]["nested"]["properties"]["tags"]["items"]["type"] == "STRING"
+    assert "additionalProperties" not in cleaned
+
+
+def test_google_system_prompt_delegates_confirmation_to_cli(google_config):
+    """Provider prompt should direct Gemini to call tools instead of asking for text confirmation."""
+    provider = GoogleProvider(google_config)
+
+    prompt = provider.get_system_prompt()
+
+    assert "Never ask for execution confirmation in plain text." in prompt
+    assert "Always ask for confirmation before executing potentially destructive commands" not in prompt

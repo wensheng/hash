@@ -3,6 +3,7 @@
 from unittest.mock import patch, MagicMock
 
 from hashcli.command_proxy import Command, CommandProxy
+from hashcli.history import ConversationHistory
 from hashcli.commands.help import HelpCommand
 
 
@@ -109,6 +110,36 @@ class TestCommandProxy:
 
         result = proxy.execute("/hello")
         assert result == "hello without config"
+
+    def test_history_show_accepts_unique_session_prefix(self, sample_config, temp_dir):
+        """History show should resolve a unique leading session ID prefix."""
+        sample_config.history_dir = temp_dir / "history"
+        history = ConversationHistory(sample_config.history_dir)
+        session_id = "12345678-1234-1234-1234-123456789abc"
+        history.start_session(title="Prefix Session", session_id=session_id)
+        history.add_message(session_id, "user", "hello")
+
+        proxy = CommandProxy(sample_config)
+        result = proxy.execute("/history show 12345678")
+
+        assert f"Conversation {session_id}:" in result
+        assert "[USER] hello" in result
+
+    def test_history_show_rejects_ambiguous_session_prefix(self, sample_config, temp_dir):
+        """History show should ask for a longer prefix when multiple sessions match."""
+        sample_config.history_dir = temp_dir / "history"
+        history = ConversationHistory(sample_config.history_dir)
+        first_id = "12345678-1234-1234-1234-123456789abc"
+        second_id = "12345678-abcd-1234-1234-123456789abc"
+        history.start_session(title="First Session", session_id=first_id)
+        history.start_session(title="Second Session", session_id=second_id)
+
+        proxy = CommandProxy(sample_config)
+        result = proxy.execute("/history show 12345678")
+
+        assert "Ambiguous session ID prefix" in result
+        assert first_id in result
+        assert second_id in result
 
 
 class TestHelpCommand:

@@ -221,6 +221,40 @@ class ConversationHistory:
 
             return sessions
 
+    def find_session_ids(self, session_id_prefix: str, limit: int = 10) -> List[str]:
+        """Find session IDs matching an exact ID or unique prefix."""
+        normalized_prefix = session_id_prefix.strip()
+        if not normalized_prefix:
+            return []
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                SELECT id
+                FROM sessions
+                WHERE id LIKE ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+            """,
+                (f"{normalized_prefix}%", limit),
+            )
+            return [row[0] for row in cursor.fetchall()]
+
+    def resolve_session_id(self, session_id_or_prefix: str) -> Optional[str]:
+        """Resolve a session ID from an exact ID or a unique prefix."""
+        normalized = session_id_or_prefix.strip()
+        if not normalized:
+            return None
+
+        exact_match = self.get_session_info(normalized)
+        if exact_match is not None:
+            return normalized
+
+        matches = self.find_session_ids(normalized, limit=2)
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
     def get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get information about a specific session."""
         with sqlite3.connect(self.db_path) as conn:

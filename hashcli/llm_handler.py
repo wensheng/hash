@@ -15,10 +15,17 @@ from .ui import console
 class ToolCall:
     """Represents a tool call request from the LLM."""
 
-    def __init__(self, name: str, arguments: Dict[str, Any], call_id: Optional[str] = None):
+    def __init__(
+        self,
+        name: str,
+        arguments: Dict[str, Any],
+        call_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
         self.name = name
         self.arguments = arguments
         self.call_id = call_id or f"call_{name}_{hash(str(arguments))}"
+        self.metadata = metadata or {}
 
     def __repr__(self):
         return f"ToolCall(name='{self.name}', arguments={self.arguments})"
@@ -253,7 +260,7 @@ class LLMHandler:
                 if force_tool_confirmation is not None:
                     effective_confirmation = force_tool_confirmation
 
-                if effective_confirmation and executor.requires_confirmation():
+                if self._should_confirm_tool_call(executor, tool_call, effective_confirmation):
                     if not self._get_user_confirmation(tool_call):
                         tool_results.append({
                             "tool_call_id": tool_call.call_id,
@@ -290,6 +297,7 @@ class LLMHandler:
                             "name": tc.name,
                             "arguments": json.dumps(tc.arguments),
                         },
+                        **tc.metadata,
                     }
                     for tc in current_response.tool_calls
                 ],
@@ -347,6 +355,24 @@ class LLMHandler:
             output = result.get("output") or "No output."
             chunks.append(f"Tool result ({name}):\n{output}")
         return "\n\n".join(chunks)
+
+    def _should_confirm_tool_call(
+        self,
+        executor: Any,
+        tool_call: ToolCall,
+        effective_confirmation: bool,
+    ) -> bool:
+        """Apply config-level confirmation plus hard overrides for destructive shell actions."""
+        if effective_confirmation and executor.requires_confirmation():
+            return True
+
+        if tool_call.name != "execute_shell_command":
+            return False
+
+        from .tools.shell import ShellTool
+
+        command = tool_call.arguments.get("command")
+        return ShellTool.is_potentially_destructive_command(command)
 
     def _get_user_confirmation(self, tool_call: ToolCall) -> bool:
         """Get user confirmation for a tool call."""

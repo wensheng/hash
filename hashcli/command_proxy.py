@@ -230,10 +230,22 @@ class HistoryCommand(Command):
 
         elif args[0] == "show" and len(args) > 1:
             # Show specific conversation
-            session_id = args[1]
+            requested_session_id = args[1]
+            session_id = history.resolve_session_id(requested_session_id)
+            if session_id is None:
+                matches = history.find_session_ids(requested_session_id)
+                if len(matches) > 1:
+                    match_list = "\n".join(f"  {match}" for match in matches[:10])
+                    return (
+                        f"Ambiguous session ID prefix {requested_session_id!r}. "
+                        "Matches:\n"
+                        f"{match_list}"
+                    )
+                return f"No messages found for session {requested_session_id}"
+
             messages = history.get_session_messages(session_id)
             if not messages:
-                return f"No messages found for session {session_id}"
+                return f"No messages found for session {requested_session_id}"
 
             output = f"Conversation {session_id}:\n\n"
             for msg in messages:
@@ -255,5 +267,5 @@ class HistoryCommand(Command):
     def get_help(self) -> str:
         return """Manage conversation history:
   /history list        - List recent conversations
-  /history show <id>   - Show specific conversation
+  /history show <id>   - Show specific conversation by full ID or unique prefix
   /history clear       - Clear all history"""

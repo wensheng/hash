@@ -185,6 +185,25 @@ def _resolve_conversation_session_id(new_session: bool = False) -> Optional[str]
     return f"shell-{digest}"
 
 
+def _resolve_provider_option(provider: str) -> LLMProvider:
+    """Accept full provider names plus single-letter aliases."""
+    normalized = provider.strip().lower()
+    aliases = {
+        "a": LLMProvider.ANTHROPIC,
+        "anthropic": LLMProvider.ANTHROPIC,
+        "g": LLMProvider.GOOGLE,
+        "google": LLMProvider.GOOGLE,
+        "o": LLMProvider.OPENAI,
+        "openai": LLMProvider.OPENAI,
+    }
+
+    if normalized in aliases:
+        return aliases[normalized]
+
+    valid = "a/anthropic, g/google, o/openai"
+    raise ValueError(f"Invalid provider: {provider}. Expected one of {valid}.")
+
+
 def _resolve_add_cmd_source(add_cmd_value: str) -> Path:
     """Resolve --add-cmd input to a Python plugin file."""
     source_path = Path(add_cmd_value).expanduser()
@@ -300,6 +319,11 @@ def _is_command_oriented_query(user_query: Optional[str]) -> bool:
         r"\bexecute\b",
         r"\binstall\b",
         r"\buninstall\b",
+        r"\bkill\b",
+        r"\bstop\b",
+        r"\brestart\b",
+        r"\bdelete\b",
+        r"\bremove\b",
         r"\blist\b",
         r"\bshow\b",
         r"\bcheck\b",
@@ -403,6 +427,11 @@ def _extract_suggested_command(
             "tail",
             "head",
             "cat",
+            "kill",
+            "killall",
+            "pkill",
+            "lsof",
+            "fuser",
             "grep",
             "rg",
             "find",
@@ -650,18 +679,21 @@ async def _maybe_execute_suggested_command(
     if not suggested_command:
         return
 
-    if require_confirmation:
+    from hashcli.tools.shell import ShellTool
+
+    must_confirm = require_confirmation or ShellTool.is_potentially_destructive_command(suggested_command)
+
+    if must_confirm:
         question = f"do you want execute `{suggested_command}`?"
         if not Confirm.ask(question, default=False, console=console):
             return
-
-    from hashcli.tools.shell import ShellTool
 
     tool = ShellTool()
     result = await tool.execute(
         {
             "command": suggested_command,
             "description": "User-confirmed command execution",
+            "passthrough_output": True,
         },
         config,
     )
@@ -959,7 +991,7 @@ def main(
         None,
         "--provider",
         "-p",
-        help="Override LLM provider (openai, anthropic, google)",
+        help="Override LLM provider (openai/anthropic/google or o/a/g)",
     ),
     new_session: bool = typer.Option(
         False,
@@ -1035,7 +1067,7 @@ def main(
 
         # Update config with CLI options
         if provider:
-            config.llm_provider = LLMProvider(provider)
+            config.llm_provider = _resolve_provider_option(provider)
 
         query_policy = _build_query_execution_policy(raw_input, input_text, config.require_confirmation)
 

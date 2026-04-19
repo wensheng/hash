@@ -12,7 +12,9 @@ from hashcli.main import (
     _build_shell_scope_fingerprint,
     _extract_suggested_command,
     _is_command_oriented_query,
+    _maybe_execute_suggested_command,
     _normalize_shell_input,
+    _resolve_provider_option,
     _resolve_conversation_session_id,
     _strip_execute_prompt_lines,
     app,
@@ -55,6 +57,38 @@ def test_show_config_callback():
     assert "Hash CLI Configuration" in result.stdout
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("a", LLMProvider.ANTHROPIC),
+        ("anthropic", LLMProvider.ANTHROPIC),
+        ("g", LLMProvider.GOOGLE),
+        ("google", LLMProvider.GOOGLE),
+        ("o", LLMProvider.OPENAI),
+        ("openai", LLMProvider.OPENAI),
+    ],
+)
+def test_resolve_provider_option_accepts_single_letter_aliases(raw, expected):
+    """Provider CLI option should accept both full names and one-letter aliases."""
+    assert _resolve_provider_option(raw) == expected
+
+
+def test_main_provider_short_alias_overrides_config(mocker):
+    """Short provider aliases should route through the same CLI override path."""
+    config = HashConfig(llm_provider=LLMProvider.OPENAI)
+    mocker.patch("hashcli.main.load_configuration", return_value=config)
+    mocker.patch("hashcli.main.validate_api_setup")
+    llm_mode = mocker.Mock(return_value=None)
+    mocker.patch("hashcli.main.execute_llm_mode", llm_mode)
+    mocker.patch("hashcli.main.asyncio.run")
+
+    result = runner.invoke(app, ["-pa", "hello"])
+
+    assert result.exit_code == 0
+    assert config.llm_provider == LLMProvider.ANTHROPIC
+    llm_mode.assert_called_once()
+
+
 def test_config_wizard_preserves_existing_comments_and_unrelated_settings(mocker, tmp_path):
     """Interactive config should update only chosen keys and preserve comments/unrelated settings."""
     mock_home = tmp_path / "home"
@@ -74,14 +108,14 @@ def test_config_wizard_preserves_existing_comments_and_unrelated_settings(mocker
     mocker.patch("hashcli.config.Path.home", return_value=mock_home)
     mocker.patch("hashcli.main.ensure_shell_integration", return_value="skipped")
 
-    result = runner.invoke(app, ["--config"], input="1\n1\nsecret-key\n")
+    result = runner.invoke(app, ["--config"], input="1\nsecret-key\n")
 
     assert result.exit_code == 0
     content = config_path.read_text(encoding="utf-8")
     assert "# keep this comment" in content
     assert "streaming = true" in content
     assert 'llm_provider = "openai"' in content
-    assert 'openai_model = "gpt-5.2"' in content
+    assert 'openai_model = "gpt-5-nano"' in content
     assert 'openai_api_key = "secret-key"' in content
 
 
@@ -579,6 +613,47 @@ async def test_llm_mode_command_query_can_auto_execute_suggestion(mocker):
 
     mock_maybe_execute.assert_awaited_once()
     assert mock_maybe_execute.call_args.kwargs["require_confirmation"] is False
+
+
+@pytest.mark.asyncio
+async def test_maybe_execute_suggested_command_uses_passthrough_output(mocker):
+    """Suggested command execution should stream child prompts directly to the terminal."""
+    mock_execute = mocker.AsyncMock(return_value="")
+    mocker.patch("hashcli.tools.shell.ShellTool.execute", mock_execute)
+
+    config = HashConfig()
+    await _maybe_execute_suggested_command(
+        "To clean up Docker images, run:\n```bash\ndocker image prune -a\n```",
+        config,
+        quiet=True,
+        user_query="clean up docker images Im not using",
+        require_confirmation=False,
+    )
+
+    mock_execute.assert_awaited_once()
+    arguments = mock_execute.await_args.args[0]
+    assert arguments["command"] == "docker image prune -a"
+    assert arguments["passthrough_output"] is True
+
+
+@pytest.mark.asyncio
+async def test_maybe_execute_suggested_command_prompts_for_destructive_command_even_when_disabled(mocker):
+    """Destructive suggestions must still ask before executing."""
+    mock_confirm = mocker.patch("hashcli.main.Confirm.ask", return_value=False)
+    mock_execute = mocker.AsyncMock(return_value="")
+    mocker.patch("hashcli.tools.shell.ShellTool.execute", mock_execute)
+
+    config = HashConfig()
+    await _maybe_execute_suggested_command(
+        "SUGGESTED_COMMAND: kill -9 1234",
+        config,
+        quiet=True,
+        user_query="kill whatever is running on port 8080",
+        require_confirmation=False,
+    )
+
+    mock_confirm.assert_called_once()
+    mock_execute.assert_not_called()
 
 
 @pytest.mark.asyncio

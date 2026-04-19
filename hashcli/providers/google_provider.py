@@ -137,11 +137,23 @@ class GoogleProvider(LLMProvider):
 
                         if part.function_call:
                             # Extract tool call
+                            function_call_id = getattr(part.function_call, "id", None)
                             tool_calls.append(
                                 ToolCall(
                                     name=part.function_call.name,
                                     arguments=part.function_call.args,
-                                    call_id=f"call_{part.function_call.name}_{hash(str(part.function_call.args))}",
+                                    call_id=(
+                                        function_call_id
+                                        or f"call_{part.function_call.name}_{hash(str(part.function_call.args))}"
+                                    ),
+                                    metadata={
+                                        key: value
+                                        for key, value in {
+                                            "thought": getattr(part, "thought", None),
+                                            "thought_signature": getattr(part, "thought_signature", None),
+                                        }.items()
+                                        if value is not None
+                                    },
                                 )
                             )
 
@@ -242,12 +254,29 @@ class GoogleProvider(LLMProvider):
         return google_tools
 
     def _clean_parameter_schema(self, schema: Dict[str, Any]) -> Dict[str, Any]:
-        """Recursively remove unsupported fields from parameter schema."""
+        """Recursively remove unsupported fields and fix types for Google AI."""
         if not isinstance(schema, dict):
             return schema
 
         cleaned = {}
         for key, value in schema.items():
+            # Handle the 'type' field specifically for Google API
+            if key == "type":
+                if isinstance(value, list):
+                    # Google Gemini doesn't support list-based types (like nullable types)
+                    # Pick the first non-null type and map it
+                    types_list = [t for t in value if t != "null"]
+                    if types_list:
+                        cleaned[key] = types_list[0].upper()
+                    else:
+                        cleaned[key] = "NULL"
+                elif isinstance(value, str):
+                    # Ensure standard types are uppercase as expected by GenAI SDK
+                    cleaned[key] = value.upper()
+                else:
+                    cleaned[key] = value
+                continue
+
             # Google API doesn't support additionalProperties in the schema
             if key in ("additionalProperties", "additional_properties"):
                 continue
@@ -256,7 +285,8 @@ class GoogleProvider(LLMProvider):
                 cleaned[key] = self._clean_parameter_schema(value)
             elif isinstance(value, list):
                 cleaned[key] = [
-                    self._clean_parameter_schema(item) if isinstance(item, dict) else item for item in value
+                    self._clean_parameter_schema(item) if isinstance(item, dict) else item
+                    for item in value
                 ]
             else:
                 cleaned[key] = value
@@ -337,7 +367,18 @@ class GoogleProvider(LLMProvider):
                             if tool_id:
                                 tool_id_to_name[tool_id] = name
 
-                            parts.append(types.Part(function_call=types.FunctionCall(name=name, args=args)))
+                            function_call = types.FunctionCall(
+                                id=tool_id,
+                                name=name,
+                                args=args,
+                            )
+                            parts.append(
+                                types.Part(
+                                    function_call=function_call,
+                                    thought=tc.get("thought"),
+                                    thought_signature=tc.get("thought_signature"),
+                                )
+                            )
 
                 if parts:
                     contents.append(types.Content(role="model", parts=parts))
@@ -453,7 +494,7 @@ Key capabilities:
 
 Guidelines:
 - Be concise and keep responses under {self.config.max_response_tokens} tokens unless the user explicitly requests more
-- Always ask for confirmation before executing potentially destructive commands
+- Never ask for execution confirmation in plain text. The CLI handles confirmation, including destructive shell commands.
 - Provide command explanations when helpful
 - Suggest alternatives when appropriate
 - Prioritize security and best practices
@@ -463,7 +504,7 @@ Guidelines:
 - Stay within command assistance. Do not position yourself as a general debugging, code-analysis, or workflow-automation agent.
 
 Tool usage policy:
-- **Action Requests:** If the user asks you to perform a shell action or retrieve command output directly (e.g., "show me disk usage", "list files", "check time"), **CALL THE TOOL DIRECTLY**. Do not ask for confirmation in text; the system handles that.
+- **Action Requests:** If the user asks you to perform a shell action or retrieve command output directly (e.g., "show me disk usage", "list files", "check time"), **CALL THE TOOL DIRECTLY**. Do not ask for confirmation in text; the CLI handles that.
 - **Command-Hint Requests:** If the user explicitly provides a command hint (for example: "Use `find` as command hint"), treat it as an execution request and **CALL THE TOOL DIRECTLY** using that hint.
 - **Command Lookup:** If the user asks about a specific command and you need grounded syntax, examples, or option details, call `lookup_tldr_command` before answering. Prefer this for uncommon, platform-specific, or low-confidence command questions.
 - **Informational/How-to Requests:** If the user asks *how* to do something that involves a command (e.g., "how do I check disk usage", "explain ls command"), provide a text explanation. Use `lookup_tldr_command` if you need grounded command details, but do not execute shell commands for explanation-only requests. On the last line of your response, output exactly: `SUGGESTED_COMMAND: <command>` (where `<command>` is the full command string to execute).

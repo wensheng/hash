@@ -1,8 +1,9 @@
 """Shell command execution tool for LLM."""
 
+import re
 import shlex
 import subprocess
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Sequence
 
 from ..config import HashConfig
 from .base import Tool
@@ -11,11 +12,57 @@ from .base import Tool
 class ShellTool(Tool):
     """Tool for executing shell commands."""
 
+    _DESTRUCTIVE_COMMAND_PATTERNS = (
+        r"\bkill(?:all)?\b",
+        r"\bpkill\b",
+        r"\bfuser\b[^\n\r]*\s-k\b",
+        r"\blsof\b[^\n\r]*\|\s*xargs\b[^\n\r]*\bkill\b",
+        r"\btaskkill\b",
+        r"\bstop-process\b",
+        r"\bremove-item\b",
+        r"\brm\b",
+        r"\bdel\b",
+        r"\bmv\b",
+        r"\bchmod\b",
+        r"\bchown\b",
+        r"\btruncate\b",
+        r"\bmkfs\b",
+        r"\bdd\b",
+        r"\bshutdown\b",
+        r"\breboot\b",
+        r"\bpoweroff\b",
+        r"\binit\s+[06]\b",
+        r"\blaunchctl\s+(?:unload|remove|bootout)\b",
+        r"\bsystemctl\s+(?:stop|restart|kill|disable|mask)\b",
+        r"\bservice\s+\S+\s+(?:stop|restart)\b",
+        r"\bdocker\s+(?:rm|rmi|stop|kill)\b",
+        r"\bkubectl\s+delete\b",
+        r"\bgit\s+reset\b",
+        r"\bgit\s+clean\b",
+        r"\bbrew\s+uninstall\b",
+        r"\bapt(?:-get)?\s+remove\b",
+        r"\byum\s+remove\b",
+        r"\bdnf\s+remove\b",
+        r"\bpacman\s+-R\b",
+    )
+
     def get_name(self) -> str:
         return "execute_shell_command"
 
     def get_description(self) -> str:
         return "Execute a shell command and return its output"
+
+    @classmethod
+    def is_potentially_destructive_command(cls, command: Any) -> bool:
+        """Return True when the command can stop processes or mutate the system."""
+        if not isinstance(command, str):
+            return False
+
+        normalized = command.strip().lower()
+        if not normalized:
+            return False
+
+        return any(re.search(pattern, normalized) for pattern in cls._DESTRUCTIVE_COMMAND_PATTERNS)
 
     async def execute(self, arguments: Dict[str, Any], config: HashConfig) -> str:
         """Execute a shell command with security checks."""
@@ -26,6 +73,7 @@ class ShellTool(Tool):
         # Extract arguments
         command = arguments.get("command", "")
         arguments.get("description", "Shell command")
+        passthrough_output = bool(arguments.get("passthrough_output", False))
 
         if not command:
             return "No command provided."
@@ -36,55 +84,7 @@ class ShellTool(Tool):
             return security_check
 
         try:
-            use_shell = self._should_use_shell(command, config)
-
-            if use_shell:
-                # Execute via shell only when explicitly enabled for operators.
-                result = subprocess.run(
-                    command,
-                    capture_output=True,
-                    text=True,
-                    timeout=config.command_timeout,
-                    shell=True,
-                    cwd=None,
-                )
-            else:
-                # Parse command safely
-                if isinstance(command, str):
-                    # Use shlex to safely parse the command
-                    cmd_args = shlex.split(command)
-                else:
-                    cmd_args = command
-
-                # Execute command with security restrictions
-                result = subprocess.run(
-                    cmd_args,
-                    capture_output=True,
-                    text=True,
-                    timeout=config.command_timeout,
-                    shell=False,  # Never use shell=True for security
-                    cwd=None,  # Use current directory
-                )
-
-            # Format output
-            output = ""
-            if result.stdout:
-                output += result.stdout
-
-            if result.stderr:
-                if output:
-                    output += "\n\n"
-                output += f"stderr:\n{result.stderr}"
-
-            if result.returncode != 0:
-                if output:
-                    output += "\n\n"
-                output += f"Exit code: {result.returncode}"
-
-            if not output:
-                output = f"Command completed successfully (exit code: {result.returncode})"
-
-            return output.strip()
+            return self._run_command(command, config, passthrough_output=passthrough_output)
 
         except subprocess.TimeoutExpired:
             return f"Command timed out after {config.command_timeout} seconds"
@@ -101,6 +101,62 @@ class ShellTool(Tool):
             return f"Command not found: {cmd_preview[0] if cmd_preview else 'unknown'}"
         except Exception as e:
             return f"Error executing command: {e}"
+
+    def _run_command(
+        self,
+        command: Any,
+        config: HashConfig,
+        passthrough_output: bool = False,
+    ) -> str:
+        """Run a validated command and optionally stream child stdio directly to the user."""
+
+        use_shell = self._should_use_shell(command, config)
+        cmd_args: Optional[Sequence[str]] = None
+
+        if not use_shell:
+            if isinstance(command, str):
+                # Use shlex to safely parse the command
+                cmd_args = shlex.split(command)
+            else:
+                cmd_args = command
+
+        run_kwargs: Dict[str, Any] = {
+            "text": True,
+            "timeout": config.command_timeout,
+            "shell": use_shell,
+            "cwd": None,
+        }
+
+        if passthrough_output:
+            result = subprocess.run(command if use_shell else cmd_args, **run_kwargs)
+            if result.returncode != 0:
+                return f"Exit code: {result.returncode}"
+            return ""
+
+        result = subprocess.run(
+            command if use_shell else cmd_args,
+            capture_output=True,
+            **run_kwargs,
+        )
+
+        output = ""
+        if result.stdout:
+            output += result.stdout
+
+        if result.stderr:
+            if output:
+                output += "\n\n"
+            output += f"stderr:\n{result.stderr}"
+
+        if result.returncode != 0:
+            if output:
+                output += "\n\n"
+            output += f"Exit code: {result.returncode}"
+
+        if not output:
+            output = f"Command completed successfully (exit code: {result.returncode})"
+
+        return output.strip()
 
     def _validate_command_security(self, command: str, config: HashConfig) -> str:
         """Validate command against security policies."""

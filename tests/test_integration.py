@@ -317,6 +317,43 @@ class TestLLMIntegration:
                 mock_tool.execute.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_llm_handler_destructive_shell_tool_still_prompts_when_config_disables_confirmation(
+        self,
+        sample_config,
+        temp_dir,
+    ):
+        """Destructive shell actions must still prompt even if global confirmation is off."""
+        from hashcli.llm_handler import ToolCall
+
+        sample_config.history_dir = temp_dir / "history"
+        sample_config.require_confirmation = False
+
+        mock_provider = MagicMock()
+        mock_provider.generate_response = AsyncMock()
+
+        tool_call = ToolCall(
+            name="execute_shell_command",
+            arguments={"command": "kill -9 1234", "description": "Terminate the process"},
+        )
+        initial_response = LLMResponse(content="Running command", tool_calls=[tool_call], model="test-model")
+        final_response = LLMResponse(content="User declined to execute this tool call.", tool_calls=[], model="test")
+        mock_provider.generate_response.side_effect = [initial_response, final_response]
+
+        with patch("hashcli.tools.get_tool_executor") as mock_get_tool:
+            mock_tool = MagicMock()
+            mock_tool.execute = AsyncMock(return_value="should-not-run")
+            mock_tool.requires_confirmation.return_value = True
+            mock_get_tool.return_value = mock_tool
+
+            handler = LLMHandler(sample_config)
+            handler.provider = mock_provider
+            with patch.object(handler, "_get_user_confirmation", return_value=False) as mock_confirm:
+                await handler.chat("kill whatever is running on port 8080")
+
+                mock_confirm.assert_called_once()
+                mock_tool.execute.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_llm_handler_how_to_only_exposes_tldr_tool(self, sample_config, temp_dir):
         """How-to command queries should not expose direct shell execution."""
         sample_config.history_dir = temp_dir / "history"
@@ -552,6 +589,29 @@ class TestSecurityFeatures:
 
             assert "Blocked command detected" in result
             mock_run.assert_not_called()
+
+    def test_shell_tool_passthrough_skips_output_capture(self, sample_config):
+        """Passthrough mode should inherit stdio so interactive prompts remain visible."""
+        from hashcli.tools.shell import ShellTool
+
+        mock_result = MagicMock(returncode=0)
+        with patch("hashcli.tools.shell.subprocess.run", return_value=mock_result) as mock_run:
+            tool = ShellTool()
+            result = asyncio.run(
+                tool.execute(
+                    {
+                        "command": "docker image prune -a",
+                        "description": "Prune unused Docker images",
+                        "passthrough_output": True,
+                    },
+                    sample_config,
+                )
+            )
+
+        assert result == ""
+        _, kwargs = mock_run.call_args
+        assert "capture_output" not in kwargs
+        assert kwargs["shell"] is False
 
     def test_file_access_restrictions(self, sample_config):
         """Test file access security restrictions."""

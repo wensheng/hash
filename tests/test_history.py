@@ -162,6 +162,25 @@ class TestConversationHistory:
         assert session1_info["message_count"] == 1
         assert session2_info["message_count"] == 2
 
+    def test_resolve_session_id_accepts_unique_prefix(self, temp_dir):
+        """Unique session ID prefixes should resolve to the full session ID."""
+        history = ConversationHistory(temp_dir / "history")
+        session_id = "12345678-1234-1234-1234-123456789abc"
+        history.start_session(title="Prefix Test", session_id=session_id)
+
+        assert history.resolve_session_id("12345678") == session_id
+
+    def test_resolve_session_id_returns_none_for_ambiguous_prefix(self, temp_dir):
+        """Ambiguous prefixes should not resolve to an arbitrary session."""
+        history = ConversationHistory(temp_dir / "history")
+        first_id = "12345678-1234-1234-1234-123456789abc"
+        second_id = "12345678-abcd-1234-1234-123456789abc"
+        history.start_session(title="First", session_id=first_id)
+        history.start_session(title="Second", session_id=second_id)
+
+        assert history.resolve_session_id("12345678") is None
+        assert set(history.find_session_ids("12345678")) == {first_id, second_id}
+
     def test_search_messages(self, temp_dir):
         """Test searching messages."""
         history = ConversationHistory(temp_dir / "history")
