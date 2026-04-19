@@ -30,7 +30,7 @@ def test_main_no_args_shows_welcome():
     """Test that running with no arguments shows the welcome message."""
     result = runner.invoke(app, [])
     assert result.exit_code == 0
-    assert "Hash CLI - Intelligent Terminal Assistant" in result.stdout
+    assert "Hash CLI - Command Assistant" in result.stdout
 
 
 def test_version_callback():
@@ -40,6 +40,14 @@ def test_version_callback():
     assert "Hash CLI version" in result.stdout
 
 
+def test_short_help_flag():
+    """Test the -h flag."""
+    result = runner.invoke(app, ["-h"])
+    assert result.exit_code == 0
+    assert "Usage:" in result.stdout
+    assert "--help" in result.stdout
+
+
 def test_show_config_callback():
     """Test the --show-config flag."""
     result = runner.invoke(app, ["--show-config"])
@@ -47,8 +55,38 @@ def test_show_config_callback():
     assert "Hash CLI Configuration" in result.stdout
 
 
-def test_setup_callback(mocker, tmp_path):
-    """Test the --setup flag."""
+def test_config_wizard_preserves_existing_comments_and_unrelated_settings(mocker, tmp_path):
+    """Interactive config should update only chosen keys and preserve comments/unrelated settings."""
+    mock_home = tmp_path / "home"
+    config_dir = mock_home / ".hashcli"
+    config_dir.mkdir(parents=True)
+    config_path = config_dir / "config.toml"
+    config_path.write_text(
+        "\n".join([
+            "# keep this comment",
+            "streaming = true",
+            'openai_model = "old-model"',
+        ])
+        + "\n",
+        encoding="utf-8",
+    )
+
+    mocker.patch("hashcli.config.Path.home", return_value=mock_home)
+    mocker.patch("hashcli.main.ensure_shell_integration", return_value="skipped")
+
+    result = runner.invoke(app, ["--config"], input="1\n1\nsecret-key\n")
+
+    assert result.exit_code == 0
+    content = config_path.read_text(encoding="utf-8")
+    assert "# keep this comment" in content
+    assert "streaming = true" in content
+    assert 'llm_provider = "openai"' in content
+    assert 'openai_model = "gpt-5.2"' in content
+    assert 'openai_api_key = "secret-key"' in content
+
+
+def test_config_runs_shell_setup_when_not_installed(mocker, tmp_path):
+    """The config wizard should install shell integration when needed."""
     # Create a mock shell directory structure
     mock_shell_dir = tmp_path / "shell" / "zsh"
     mock_shell_dir.mkdir(parents=True)
@@ -73,8 +111,9 @@ def test_setup_callback(mocker, tmp_path):
     shutil.copytree(tmp_path / "shell", mock_package_path / "shell", dirs_exist_ok=True)
 
     mock_run = mocker.patch("hashcli.main.subprocess.run")
+    mocker.patch("hashcli.config.Path.home", return_value=tmp_path)
 
-    result = runner.invoke(app, ["--setup"], env={"SHELL": "/bin/zsh"})
+    result = runner.invoke(app, ["--config"], input="1\n1\nsecret-key\n", env={"SHELL": "/bin/zsh"})
     assert result.exit_code == 0
     assert "Installing zsh shell integration" in result.stdout
     assert mock_run.called
@@ -82,6 +121,26 @@ def test_setup_callback(mocker, tmp_path):
     assert args[0][0] == "/bin/bash"
     assert "install.sh" in str(args[0][1])
     assert args[0][2] == "install"
+
+
+def test_config_skips_shell_setup_when_already_installed(mocker, tmp_path):
+    """The config wizard should skip shell integration when already configured."""
+    mock_home = tmp_path / "home"
+    (mock_home / ".config" / "zsh" / "hash" / "completions").mkdir(parents=True)
+    (mock_home / ".config" / "zsh" / "hash" / "hash.zsh").write_text("", encoding="utf-8")
+    (mock_home / ".config" / "zsh" / "hash" / "completions" / "_hash").write_text("", encoding="utf-8")
+    (mock_home / ".zshrc").write_text("source ~/.config/zsh/hash/hash.zsh\n", encoding="utf-8")
+    (mock_home / ".hashcli").mkdir(parents=True)
+
+    mocker.patch("hashcli.main.Path.home", return_value=mock_home)
+    mocker.patch("hashcli.config.Path.home", return_value=mock_home)
+    mock_run = mocker.patch("hashcli.main.subprocess.run")
+
+    result = runner.invoke(app, ["--config"], input="1\n1\nsecret-key\n", env={"SHELL": "/bin/zsh"})
+
+    assert result.exit_code == 0
+    assert "already configured, skipping" in result.stdout
+    mock_run.assert_not_called()
 
 
 def test_command_mode_execution(mocker):

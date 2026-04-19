@@ -1,11 +1,16 @@
 """Configuration management for Hash CLI with multi-source loading."""
 
 import os
+import platform
+import re
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import tomllib
+if platform.python_version_tuple() < ("3", "11"):
+    import tomli
+else:
+    import tomllib
 
 import tomli_w
 from pydantic import BaseModel, Field, validator
@@ -76,12 +81,6 @@ class HashConfig(BaseModel):
     blocked_commands: List[str] = Field(
         default_factory=lambda: ["rm -rf", "sudo", "su"],
         description="Blacklist of blocked commands",
-    )
-
-    # Command Plugin Configuration
-    plugin_commands: Dict[str, str] = Field(
-        default_factory=dict,
-        description="Map of command names to plugin import paths or file paths",
     )
 
     class Config:
@@ -331,6 +330,80 @@ def save_config(config: HashConfig, config_path: Optional[Path] = None) -> bool:
         return False
 
 
+def _normalize_toml_value(value: Any) -> Any:
+    """Normalize values for TOML serialization."""
+    if hasattr(value, "value"):
+        return value.value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, list):
+        return [_normalize_toml_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _normalize_toml_value(item) for key, item in value.items()}
+    return value
+
+
+def update_config_values(updates: Dict[str, Any], config_path: Optional[Path] = None) -> bool:
+    """Update only specified top-level keys in a TOML config file, preserving comments and other settings."""
+    if config_path is None:
+        config_path = Path.home() / ".hashcli" / "config.toml"
+
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        normalized_updates = {
+            key: _normalize_toml_value(value)
+            for key, value in updates.items()
+            if value is not None
+        }
+
+        serialized_assignments = {
+            key: tomli_w.dumps({key: value}).strip()
+            for key, value in normalized_updates.items()
+        }
+
+        if not config_path.exists():
+            content = "\n".join(serialized_assignments[key] for key in normalized_updates)
+            config_path.write_text(f"{content}\n" if content else "", encoding="utf-8")
+            return True
+
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+        updated_keys = set()
+
+        for index, line in enumerate(lines):
+            stripped = line.lstrip()
+            if not stripped or stripped.startswith("#"):
+                continue
+
+            for key, assignment in serialized_assignments.items():
+                pattern = re.compile(rf"^(\s*){re.escape(key)}(\s*=\s*)(.*?)(\s*(#.*))?$")
+                match = pattern.match(line)
+                if match is None:
+                    continue
+
+                leading_ws = match.group(1)
+                inline_comment = match.group(4) or ""
+                lines[index] = f"{leading_ws}{assignment}{inline_comment}"
+                updated_keys.add(key)
+                break
+
+        missing_keys = [key for key in normalized_updates if key not in updated_keys]
+        if missing_keys:
+            if lines and lines[-1] != "":
+                lines.append("")
+            for key in missing_keys:
+                lines.append(serialized_assignments[key])
+
+        final_text = "\n".join(lines)
+        if lines:
+            final_text += "\n"
+        config_path.write_text(final_text, encoding="utf-8")
+        return True
+
+    except Exception:
+        return False
+
+
 # Configuration validation and helper functions
 class ConfigurationError(Exception):
     """Configuration-related errors."""
@@ -359,9 +432,8 @@ def get_model_options(provider: LLMProvider) -> List[str]:
         ]
     elif provider == LLMProvider.ANTHROPIC:
         return [
-            "claude-opus-4-5-20251101",
-            "claude-sonnet-4-5-20250929",
             "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-6",
             "claude-3-haiku-20240307",
         ]
     elif provider == LLMProvider.GOOGLE:
@@ -374,3 +446,10 @@ def get_model_options(provider: LLMProvider) -> List[str]:
         ]
     else:
         return []
+
+
+default_model = {
+    LLMProvider.OPENAI: "gpt-5-nano",
+    LLMProvider.ANTHROPIC: "claude-haiku-4-5-20251001",
+    LLMProvider.GOOGLE: "gemini-3.1-flash-lite-preview"
+}

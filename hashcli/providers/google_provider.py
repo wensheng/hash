@@ -27,7 +27,7 @@ class GoogleProvider(LLMProvider):
         """Generate response using Google AI API."""
 
         try:
-            disable_tool_calls = self._should_disable_tool_calls(messages)
+            disable_tool_calls = self._should_disable_tool_calls(messages, tools)
 
             # Prepare messages and tools
             if self.is_gemma_model and tools:
@@ -179,14 +179,30 @@ class GoogleProvider(LLMProvider):
 
             return LLMResponse(content=f"Google AI error: {error_message}", model=self.model_name)
 
-    def _should_disable_tool_calls(self, messages: List[Dict[str, Any]]) -> bool:
-        """Disable tool calling for how-to informational prompts."""
+    def _should_disable_tool_calls(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> bool:
+        """Disable tool calling for how-to prompts unless tldr lookup is the only tool."""
         latest_user_message = self._get_latest_user_message(messages)
         if not latest_user_message:
             return False
 
         normalized = latest_user_message.strip().lower()
-        return bool(re.match(r"^(how to|how do i|how can i|what command|which command)\b", normalized))
+        if not re.match(r"^(how to|how do i|how can i|what command|which command)\b", normalized):
+            return False
+
+        if not tools:
+            return True
+
+        tool_names = {
+            tool.get("function", {}).get("name")
+            for tool in tools
+            if tool.get("type") == "function"
+        }
+        tool_names.discard(None)
+        return bool(tool_names and tool_names != {"lookup_tldr_command"})
 
     def _get_latest_user_message(self, messages: List[Dict[str, Any]]) -> str:
         """Extract the latest user text message from conversation history."""
@@ -428,15 +444,12 @@ class GoogleProvider(LLMProvider):
 
     def get_system_prompt(self) -> str:
         """Get the system prompt for the LLM."""
-        return f"""You are Hash, an intelligent terminal assistant designed to help users with command-line tasks, programming, system administration, and general technical questions.
+        return f"""You are Hash, a command-focused terminal assistant.
 
 Key capabilities:
 - Execute shell commands (with user permission)
-- Read and analyze files
-- Search the web for current information  
-- Provide programming assistance
-- Debug and troubleshoot issues
-- Explain complex technical concepts
+- Explain shell commands and terminal workflows
+- Use integrated tldr lookups to ground command syntax and examples when needed
 
 Guidelines:
 - Be concise and keep responses under {self.config.max_response_tokens} tokens unless the user explicitly requests more
@@ -447,15 +460,16 @@ Guidelines:
 - Indicate when you're unsure and suggest verification steps
 - **Prefer simple, single-line commands** (e.g., `seq`, `grep`, `find`) over complex shell loops or scripts. Specifically, use `seq` for number sequences.
 - Shell operators `|` and `;` are {'allowed' if self.config.allow_shell_operators else 'disabled'}; only use them when allowed.
+- Stay within command assistance. Do not position yourself as a general debugging, code-analysis, or workflow-automation agent.
 
 Tool usage policy:
-- **Action Requests:** If the user asks you to perform an action or retrieve information directly (e.g., "show me disk usage", "list files", "read README.md", "check time"), **CALL THE TOOL DIRECTLY**. Do not ask for confirmation in text; the system handles that.
+- **Action Requests:** If the user asks you to perform a shell action or retrieve command output directly (e.g., "show me disk usage", "list files", "check time"), **CALL THE TOOL DIRECTLY**. Do not ask for confirmation in text; the system handles that.
 - **Command-Hint Requests:** If the user explicitly provides a command hint (for example: "Use `find` as command hint"), treat it as an execution request and **CALL THE TOOL DIRECTLY** using that hint.
-- **Informational/How-to Requests:** If the user asks *how* to do something that involves a command (e.g., "how do I check disk usage", "explain ls command"), provide a text explanation. **DO NOT call the tool**. Instead, on the last line of your response, output exactly: `SUGGESTED_COMMAND: <command>` (where `<command>` is the full command string to execute).
-- **General Knowledge:** For questions unrelated to system operations (e.g. "why is the sky blue"), simply answer the question. DO NOT append the "SUGGESTED_COMMAND" line. DO NOT use `echo` commands for plain text answers. Exception: If the answer depends on the current date/time (e.g. "how old is X"), you MUST use `execute_shell_command` with `date`.
+- **Command Lookup:** If the user asks about a specific command and you need grounded syntax, examples, or option details, call `lookup_tldr_command` before answering. Prefer this for uncommon, platform-specific, or low-confidence command questions.
+- **Informational/How-to Requests:** If the user asks *how* to do something that involves a command (e.g., "how do I check disk usage", "explain ls command"), provide a text explanation. Use `lookup_tldr_command` if you need grounded command details, but do not execute shell commands for explanation-only requests. On the last line of your response, output exactly: `SUGGESTED_COMMAND: <command>` (where `<command>` is the full command string to execute).
+- **General Knowledge:** For questions unrelated to command-line usage, answer briefly and redirect to the closest command-focused interpretation when possible. Do not use `echo` commands for plain text answers. Exception: If the answer depends on the current date/time (e.g. "how old is X"), you MUST use `execute_shell_command` with `date`.
 - **Time/Date:** For ANY query involving "today", "now", or calculating relative dates/ages, you MUST use `execute_shell_command` with `date` to obtain the system date.
-- **Web Search:** Use the `web_search` tool only when the user explicitly asks to search/browse or requests sources, or when the answer is time-sensitive/likely to change (e.g., current events, prices, schedules). Do **not** use it for general knowledge or explanatory questions (e.g., "why is the sky blue").
-- **System Checks:** For local checks (OS, username, directory), use the appropriate tool.
+- **System Checks:** For local checks available via shell (OS, username, directory), use the shell tool when execution is appropriate.
 - **Ambiguity:** If unsure whether to execute, err on the side of explaining (text response).
 
 You have access to tools that can interact with the system. Use them appropriately to assist the user effectively."""

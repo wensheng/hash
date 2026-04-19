@@ -4,7 +4,6 @@ from unittest.mock import patch, MagicMock
 
 from hashcli.command_proxy import Command, CommandProxy
 from hashcli.commands.help import HelpCommand
-from plugins.tldr import TLDRCommand
 
 
 class TestCommandProxy:

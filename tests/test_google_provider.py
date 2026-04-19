@@ -155,3 +155,38 @@ async def test_generate_response_keeps_function_calling_auto_for_action_request(
 
     config = generate_content.call_args.kwargs["config"]
     assert config.tool_config is None
+
+
+@pytest.mark.asyncio
+async def test_generate_response_keeps_tldr_lookup_enabled_for_how_to(google_config, mocker):
+    """How-to prompts may still use tool calling when tldr lookup is the only tool."""
+    provider = GoogleProvider(google_config)
+    response = SimpleNamespace(
+        candidates=[
+            SimpleNamespace(content=SimpleNamespace(parts=[SimpleNamespace(text="Use tar", function_call=None)]))
+        ],
+        usage_metadata=None,
+    )
+    generate_content = mocker.AsyncMock(return_value=response)
+    mocker.patch.object(provider.client.aio.models, "generate_content", generate_content)
+
+    tools = [{
+        "type": "function",
+        "function": {
+            "name": "lookup_tldr_command",
+            "description": "Lookup tldr examples",
+            "parameters": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+        },
+    }]
+
+    await provider.generate_response(
+        messages=[{"role": "user", "content": "how do I extract a tar.gz file"}],
+        tools=tools,
+    )
+
+    config = generate_content.call_args.kwargs["config"]
+    assert config.tool_config is None

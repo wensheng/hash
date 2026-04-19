@@ -29,7 +29,7 @@ _hash_completion() {
 _hash_command_proxy_mode() {
     local proxy_content="$1"
     local cur="${COMP_WORDS[COMP_CWORD]}"
-    local slash_commands="clean model fix help config tldr history exit quit"
+    local slash_commands="help history"
 
     # Extract the command name (after /)
     local proxy_cmd
@@ -37,42 +37,15 @@ _hash_command_proxy_mode() {
     proxy_cmd="${proxy_cmd%% *}"
 
     case "$proxy_cmd" in
-        model)
-            # Available LLM models
-            local models="gpt-4 gpt-4-turbo gpt-3.5-turbo claude-3-opus claude-3-sonnet claude-3-haiku gemini-pro gemini-1.5-pro"
-            COMPREPLY=( $(compgen -W "$models" -- "$cur") )
-            ;;
-        fix)
-            # Code fixing options and file completions
-            if [[ "$cur" == *.* ]] || [[ -f "$cur" ]]; then
-                # Complete file names
-                COMPREPLY=( $(compgen -f -X '!*.@(py|js|ts|go|rs|java|cpp|c|rb|php)' -- "$cur") )
-            else
-                local fix_options="bug error performance security style logic syntax"
-                COMPREPLY=( $(compgen -W "$fix_options" -- "$cur") )
-            fi
-            ;;
-        config)
-            # Configuration management options
-            local config_options="show set get list reset"
-            COMPREPLY=( $(compgen -W "$config_options" -- "$cur") )
-            ;;
-        clean)
-            # No additional completions for clean
-            COMPREPLY=()
-            ;;
         help)
             # Help topics
-            local help_topics="$slash_commands commands config models tools"
+            local help_topics="$slash_commands commands"
             COMPREPLY=( $(compgen -W "$help_topics" -- "$cur") )
             ;;
         history)
             # History options
             local history_options="list show clear"
             COMPREPLY=( $(compgen -W "$history_options" -- "$cur") )
-            ;;
-        exit|quit)
-            COMPREPLY=()
             ;;
         "")
             # List available slash commands
@@ -93,30 +66,18 @@ _hash_llm_mode() {
     # Provide contextual suggestions based on partial input
     local -a llm_suggestions=(
         "how do I"
-        "explain this error"
-        "help me with"
-        "troubleshoot"
-        "optimize"
+        "what command"
+        "explain"
+        "show me examples for"
         "find files"
-        "fix permission issues"
-        "debug this code"
-        "review my code"
+        "check disk usage"
         "convert this"
-        "automate this task"
-        "secure my system"
         "backup my data"
-        "monitor system performance"
         "configure"
         "install"
         "update"
-        "network connectivity issues"
         "git commands help"
-        "docker container"
-        "kubernetes"
-        "database query"
-        "API integration"
-        "testing strategy"
-        "deployment"
+        "docker command"
     )
 
     # Generate completions from suggestions

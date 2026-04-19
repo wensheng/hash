@@ -10,6 +10,7 @@ from hashcli.config import (
     LLMProvider,
     load_configuration,
     save_config,
+    update_config_values,
     get_config_paths,
     load_environment_variables,
 )
@@ -186,6 +187,39 @@ class TestConfigurationLoading:
         assert config.openai_api_key == "env-openai-key"
         assert config.anthropic_api_key == "env-anthropic-key"
         assert config.google_api_key == "env-google-key"
+
+    def test_update_config_values_preserves_comments_and_unrelated_settings(self, temp_dir):
+        """Targeted config updates should not rewrite unrelated settings or strip comments."""
+        config_path = temp_dir / "config.toml"
+        config_path.write_text(
+            "\n".join([
+                "# user note",
+                'streaming = true',
+                'openai_model = "old-model"',
+                'openai_api_key = "old-key"',
+                '# another note',
+            ])
+            + "\n",
+            encoding="utf-8",
+        )
+
+        success = update_config_values(
+            {
+                "llm_provider": "openai",
+                "openai_model": "gpt-5-mini",
+                "openai_api_key": "new-key",
+            },
+            config_path=config_path,
+        )
+
+        assert success is True
+        content = config_path.read_text(encoding="utf-8")
+        assert "# user note" in content
+        assert "# another note" in content
+        assert "streaming = true" in content
+        assert 'openai_model = "gpt-5-mini"' in content
+        assert 'openai_api_key = "new-key"' in content
+        assert 'llm_provider = "openai"' in content
 
 
 class TestProviderEnum:

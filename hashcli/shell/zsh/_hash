@@ -47,71 +47,13 @@ _hash_command_proxy_mode() {
     fi
     
     case "$proxy_cmd" in
-        model)
-            # Available LLM models
-            local -a models
-            models=(
-                'gpt-4:OpenAI GPT-4 model'
-                'gpt-4-turbo:OpenAI GPT-4 Turbo model'
-                'gpt-3.5-turbo:OpenAI GPT-3.5 Turbo model'
-                'claude-3-opus:Anthropic Claude 3 Opus'
-                'claude-3-sonnet:Anthropic Claude 3 Sonnet'
-                'claude-3-haiku:Anthropic Claude 3 Haiku'
-                'gemini-pro:Google Gemini Pro'
-                'gemini-1.5-pro:Google Gemini 1.5 Pro'
-            )
-            _describe 'available models' models
-            ;;
-        fix)
-            # Code fixing options and file completions
-            local -a fix_options
-            fix_options=(
-                'bug:Fix a bug in code'
-                'error:Resolve an error or exception'
-                'performance:Optimize performance issues'
-                'security:Address security vulnerabilities'
-                'style:Fix code style and formatting'
-                'logic:Fix logical errors'
-                'syntax:Fix syntax errors'
-            )
-            if [[ -z "$proxy_args" ]]; then
-                _describe 'fix options' fix_options
-            else
-                _files -g "*.py *.js *.ts *.go *.rs *.java *.cpp *.c *.rb *.php"
-            fi
-            ;;
-        config)
-            # Configuration management options
-            local -a config_options
-            config_options=(
-                'show:Show current configuration'
-                'set:Set configuration value'
-                'get:Get configuration value'
-                'list:List all configuration keys'
-                'reset:Reset to defaults'
-            )
-            _describe 'configuration options' config_options
-            ;;
-        clean)
-            # No additional completions for clean
-            ;;
         help)
             # Help topics
             local -a help_topics
             help_topics=(
-                'clean:Clear conversation history'
-                'model:Switch LLM model or provider'
-                'fix:Get coding assistance'
-                'tldr:Show quick command examples'
                 'help:Show available commands'
-                'config:Show or update configuration'
                 'history:Manage conversation history'
-                'exit:Exit the application'
-                'quit:Exit the application'
                 'commands:Available commands'
-                'config:Configuration help'
-                'models:Available models'
-                'tools:Available tools'
             )
             _describe 'help topics' help_topics
             ;;
@@ -124,37 +66,21 @@ _hash_command_proxy_mode() {
             )
             _describe 'history options' history_options
             ;;
-        exit|quit)
-            ;;
         *)
             # Unknown slash command: suggest built-in slash commands
             if [[ -z "$proxy_cmd" ]]; then
                 # List available slash commands
                 local -a slash_commands
                 slash_commands=(
-                    'clean:Clear conversation history'
-                    'model:Switch LLM model'
-                    'fix:Get coding assistance'
-                    'tldr:Show quick command examples'
                     'help:Show available commands'
-                    'config:Manage configuration'
                     'history:Manage conversation history'
-                    'exit:Exit the application'
-                    'quit:Exit the application'
                 )
                 _describe 'available commands' slash_commands -p '/'
             else
                 local -a slash_commands
                 slash_commands=(
-                    'clean:Clear conversation history'
-                    'model:Switch LLM model'
-                    'fix:Get coding assistance'
-                    'tldr:Show quick command examples'
                     'help:Show available commands'
-                    'config:Manage configuration'
                     'history:Manage conversation history'
-                    'exit:Exit the application'
-                    'quit:Exit the application'
                 )
                 _describe 'available commands' slash_commands -p '/'
             fi
@@ -170,30 +96,18 @@ _hash_llm_mode() {
     # Provide contextual suggestions based on partial input
     llm_suggestions=(
         'how do I...:General how-to questions'
-        'explain this error::Error explanation and troubleshooting'
-        'help me with...:General assistance requests'
-        'troubleshoot...:System and software troubleshooting'
-        'optimize...:Performance optimization advice'
+        'what command...:Command discovery'
+        'explain...:Command explanation'
+        'show me examples for...:Command examples'
         'find files...:File search and location help'
-        'fix permission issues:Resolve file/directory permission problems'
-        'debug this code::Code debugging assistance'
-        'review my code::Code review and improvement suggestions'
+        'fix permission issues:Resolve file or directory permission problems'
         'convert this...:Data or code conversion help'
-        'automate this task::Task automation guidance'
-        'secure my system::Security best practices and hardening'
         'backup my data::Data backup and recovery strategies'
-        'monitor system performance::Performance monitoring setup'
         'configure...:Configuration and setup guidance'
         'install...:Software installation help'
         'update...:Software update procedures'
-        'network connectivity issues:Network troubleshooting'
         'git commands help:Git version control assistance'
-        'docker container...:Docker containerization help'
-        'kubernetes...:Kubernetes orchestration guidance'
-        'database query...:Database query optimization'
-        'API integration...:API development and integration'
-        'testing strategy...:Software testing approaches'
-        'deployment...:Application deployment guidance'
+        'docker command...:Docker command help'
     )
     
     # Filter suggestions based on partial input

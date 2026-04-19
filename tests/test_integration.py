@@ -120,6 +120,44 @@ class TestLLMIntegration:
             assert mock_provider.generate_response.call_count == 2
 
     @pytest.mark.asyncio
+    async def test_llm_handler_with_tldr_tool_calls(self, sample_config, temp_dir):
+        """Command-help flows can use the integrated tldr tool."""
+        from hashcli.llm_handler import ToolCall
+
+        sample_config.history_dir = temp_dir / "history"
+        sample_config.require_confirmation = False
+
+        mock_provider = MagicMock()
+        mock_provider.generate_response = AsyncMock()
+
+        tool_call = ToolCall(name="lookup_tldr_command", arguments={"command": "tar"})
+        initial_response = LLMResponse(
+            content="Let me ground that with command examples.",
+            tool_calls=[tool_call],
+            model="test-model",
+        )
+        final_response = LLMResponse(
+            content="`tar` archives files. A common extraction command is `tar -xzf archive.tar.gz`.",
+            tool_calls=[],
+            model="test-model",
+        )
+        mock_provider.generate_response.side_effect = [initial_response, final_response]
+
+        with patch("hashcli.tools.get_tool_executor") as mock_get_tool:
+            mock_tool = MagicMock()
+            mock_tool.execute = AsyncMock(return_value="# tar\n> Archiving utility")
+            mock_tool.requires_confirmation.return_value = False
+            mock_get_tool.return_value = mock_tool
+
+            handler = LLMHandler(sample_config)
+            handler.provider = mock_provider
+
+            response = await handler.chat("how do I use tar to extract a tar.gz file?")
+
+            assert "tar" in response.lower()
+            mock_tool.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_llm_handler_tool_fallback_when_no_final_text(self, sample_config, temp_dir):
         """Fall back to tool output when the model returns no final text."""
         from hashcli.llm_handler import ToolCall
@@ -277,6 +315,51 @@ class TestLLMIntegration:
 
                 mock_confirm.assert_not_called()
                 mock_tool.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_llm_handler_how_to_only_exposes_tldr_tool(self, sample_config, temp_dir):
+        """How-to command queries should not expose direct shell execution."""
+        sample_config.history_dir = temp_dir / "history"
+        sample_config.history_enabled = False
+
+        mock_provider = MagicMock()
+        mock_provider.generate_response = AsyncMock(
+            return_value=LLMResponse(content="Use find", tool_calls=[], model="test-model")
+        )
+
+        handler = LLMHandler(sample_config)
+        handler.provider = mock_provider
+
+        await handler.chat("how do I find all pycache directories?")
+
+        tools = mock_provider.generate_response.call_args.kwargs["tools"]
+        tool_names = [tool["function"]["name"] for tool in tools]
+        assert tool_names == ["lookup_tldr_command"]
+
+        tldr_tool = tools[0]["function"]
+        assert tldr_tool["parameters"]["required"] == ["command", "platform", "language", "search"]
+        assert tldr_tool["parameters"]["properties"]["platform"]["type"] == ["string", "null"]
+        assert tldr_tool["parameters"]["properties"]["language"]["type"] == ["string", "null"]
+
+    @pytest.mark.asyncio
+    async def test_llm_handler_action_query_exposes_shell_and_tldr_tools(self, sample_config, temp_dir):
+        """Action-oriented command queries should expose shell execution and tldr lookup."""
+        sample_config.history_dir = temp_dir / "history"
+        sample_config.history_enabled = False
+
+        mock_provider = MagicMock()
+        mock_provider.generate_response = AsyncMock(
+            return_value=LLMResponse(content="Running", tool_calls=[], model="test-model")
+        )
+
+        handler = LLMHandler(sample_config)
+        handler.provider = mock_provider
+
+        await handler.chat("show disk usage in human readable format")
+
+        tools = mock_provider.generate_response.call_args.kwargs["tools"]
+        tool_names = [tool["function"]["name"] for tool in tools]
+        assert tool_names == ["lookup_tldr_command", "execute_shell_command"]
 
 
 class TestCommandIntegration:

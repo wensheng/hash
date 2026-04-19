@@ -39,9 +39,11 @@ from hashcli.command_proxy import (
 from hashcli.config import (
     ConfigurationError,
     LLMProvider,
+    default_model,
     get_model_options,
     load_configuration,
     save_config,
+    update_config_values,
     validate_api_setup,
 )
 from hashcli.llm_handler import LLMHandler
@@ -54,6 +56,7 @@ app = typer.Typer(
     add_completion=False,  # We'll handle completion in shell integration
     rich_markup_mode="rich",
     no_args_is_help=False,  # Allow no args to show usage info
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 
@@ -669,15 +672,15 @@ async def _maybe_execute_suggested_command(
 def show_welcome():
     """Display welcome message with usage instructions."""
     welcome_text = """
-# Hash CLI - Intelligent Terminal Assistant
+# Hash CLI - Command Assistant
 
 ## Usage Modes
 
 **LLM Chat Mode** (Natural language queries):
 ```bash
 hashcli how do I list large files?
-hashcli explain this error: permission denied
-hashcli help me debug this python script
+hashcli what command shows disk usage by directory?
+hashcli explain xargs
 ```
 
 **Command Proxy Mode** (Direct commands with `/` prefix):
@@ -754,7 +757,7 @@ def config_callback(value: bool):
 
         # Provider selection
         console.print("[bold]1. Choose your LLM provider:[/bold]")
-        console.print("   1) OpenAI (GPT-4, GPT-3.5)")
+        console.print("   1) OpenAI (OpenAI and compatible models hosted on Ollama, OpenRouter, etc.)")
         console.print("   2) Anthropic (Claude)")
         console.print("   3) Google (Gemini)")
 
@@ -762,68 +765,119 @@ def config_callback(value: bool):
 
         if provider_choice == 1:
             provider = LLMProvider.OPENAI
-            console.print("\n[bold]2. Get your OpenAI API key:[/bold]")
-            console.print("   Visit: https://platform.openai.com/api-keys")
+            console.print("\n[bold]OpenAI & Compatible Models selected[/bold]")
+            # console.print("\n[bold]2. Get your OpenAI API key:[/bold]")
+            # console.print("   Visit: https://platform.openai.com/api-keys")
         elif provider_choice == 2:
             provider = LLMProvider.ANTHROPIC
-            console.print("\n[bold]2. Get your Anthropic API key:[/bold]")
-            console.print("   Visit: https://console.anthropic.com/")
+            console.print("\n[bold]Claude & Compatible Models selected[/bold]")
+            # console.print("\n[bold]2. Get your Anthropic API key:[/bold]")
+            # console.print("   Visit: https://console.anthropic.com/")
         elif provider_choice == 3:
             provider = LLMProvider.GOOGLE
-            console.print("\n[bold]2. Get your Google AI API key:[/bold]")
-            console.print("   Visit: https://makersuite.google.com/app/apikey")
+            console.print("\n[bold]Google Gemini Models selected[/bold]")
+            # console.print("\n[bold]2. Get your Google AI API key:[/bold]")
+            # console.print("   Visit: https://makersuite.google.com/app/apikey")
         else:
             console.print("[red]Invalid choice[/red]")
             raise typer.Exit(1)
 
-        # Select Model
-        console.print(f"\n[bold]2. Select {provider.value.capitalize()} Model:[/bold]")
-        options = get_model_options(provider)
-        for i, model in enumerate(options, 1):
-            console.print(f"   {i}) {model}")
-        console.print(f"   {len(options) + 1}) Custom model name")
+        # # Select Model
+        # console.print(f"\n[bold]2. Select {provider.value.capitalize()} Model:[/bold]")
+        # options = get_model_options(provider)
+        # for i, model in enumerate(options, 1):
+        #     console.print(f"   {i}) {model}")
+        # console.print(f"   {len(options) + 1}) Custom model name")
 
-        model_choice = typer.prompt(f"Select model (1-{len(options)+1})", type=int, default=1)
+        # model_choice = typer.prompt(f"Select model (1-{len(options)+1})", type=int, default=1)
 
-        if 1 <= model_choice <= len(options):
-            selected_model = options[model_choice - 1]
-        elif model_choice == len(options) + 1:
-            selected_model = typer.prompt("Enter custom model name")
-        else:
-            console.print("[red]Invalid choice[/red]")
-            raise typer.Exit(1)
+        # if 1 <= model_choice <= len(options):
+        #     selected_model = options[model_choice - 1]
+        # elif model_choice == len(options) + 1:
+        #     selected_model = typer.prompt("Enter custom model name")
+        # else:
+        #     console.print("[red]Invalid choice[/red]")
+        #     raise typer.Exit(1)
+        selected_model = default_model[provider]
 
         # API key input
         api_key = typer.prompt("\nEnter your API key", hide_input=True)
 
-        # Save API key to config
+        # Persist only the settings chosen in this wizard, preserving existing comments and unrelated keys.
+        updates = {"llm_provider": provider.value}
         if provider == LLMProvider.OPENAI:
-            config = load_configuration()
-            config.openai_model = selected_model
-            config.openai_api_key = api_key
-            save_config(config)
+            updates["openai_model"] = selected_model
+            updates["openai_api_key"] = api_key
         elif provider == LLMProvider.ANTHROPIC:
-            config = load_configuration()
-            config.anthropic_model = selected_model
-            config.anthropic_api_key = api_key
-            save_config(config)
+            updates["anthropic_model"] = selected_model
+            updates["anthropic_api_key"] = api_key
         elif provider == LLMProvider.GOOGLE:
-            config = load_configuration()
-            config.google_model = selected_model
-            config.google_api_key = api_key
-            save_config(config)
+            updates["google_model"] = selected_model
+            updates["google_api_key"] = api_key
+
+        if not update_config_values(updates):
+            console.print("[red]Failed to save configuration[/red]")
+            raise typer.Exit(1)
+
+        shell_setup_status = ensure_shell_integration()
 
         console.print("\n[bold green]Setup complete![/bold green]")
         console.print("API key has been saved to ~/.hashcli/config.toml")
+        if shell_setup_status == "installed":
+            console.print("Shell integration has been installed.")
+        elif shell_setup_status == "skipped":
+            console.print("Shell integration is already configured. Skipped.")
+        elif shell_setup_status == "unsupported":
+            console.print("Shell integration was skipped because the current shell is not supported.")
+        elif shell_setup_status == "failed":
+            console.print("Shell integration could not be installed automatically.")
         console.print("Try: [code]hashcli hello world[/code]")
         raise typer.Exit()
 
 
-def setup_callback(value: bool):
-    """Install shell integration and exit."""
-    if not value:
-        return
+def _get_shell_integration_metadata(shell_name: str) -> Optional[dict]:
+    """Return shell-specific installation metadata."""
+    home_dir = Path.home()
+    if shell_name == "zsh":
+        return {
+            "rc_file": home_dir / ".zshrc",
+            "source_line": "source ~/.config/zsh/hash/hash.zsh",
+            "required_files": [
+                home_dir / ".config" / "zsh" / "hash" / "hash.zsh",
+                home_dir / ".config" / "zsh" / "hash" / "completions" / "_hash",
+            ],
+        }
+    if shell_name == "bash":
+        return {
+            "rc_file": home_dir / ".bashrc",
+            "source_line": "source ~/.config/bash/hash/hash.bash",
+            "required_files": [
+                home_dir / ".config" / "bash" / "hash" / "hash.bash",
+                home_dir / ".config" / "bash" / "hash" / "hash_completion.bash",
+            ],
+        }
+    return None
 
+
+def is_shell_integration_installed(shell_name: str) -> bool:
+    """Check whether shell integration is already installed for the active shell."""
+    metadata = _get_shell_integration_metadata(shell_name)
+    if metadata is None:
+        return False
+
+    if not all(path.exists() for path in metadata["required_files"]):
+        return False
+
+    rc_file = metadata["rc_file"]
+    if not rc_file.exists():
+        return False
+
+    rc_contents = rc_file.read_text(encoding="utf-8", errors="ignore")
+    return metadata["source_line"] in rc_contents
+
+
+def ensure_shell_integration() -> str:
+    """Install shell integration if needed and return installed/skipped/unsupported/failed."""
     shell_env = os.environ.get("SHELL", "")
     shell_name = Path(shell_env).name
 
@@ -832,7 +886,11 @@ def setup_callback(value: bool):
         console.print("[yellow]Shell integration setup currently supports zsh and bash only.[/yellow]")
         console.print(f"Detected shell: [dim]{shell_name or 'unknown'}[/dim]")
         console.print("For other shells, use the scripts in the shell directory.")
-        raise typer.Exit(1)
+        return "unsupported"
+
+    if is_shell_integration_installed(shell_name):
+        console.print(f"[dim]{shell_name} shell integration already configured, skipping.[/dim]")
+        return "skipped"
 
     # Copy shell scripts to ~/.hashcli/shell/ if not already there
     user_shell_dir = Path.home() / ".hashcli" / "shell"
@@ -861,10 +919,10 @@ def setup_callback(value: bool):
             console.print(f"[dim]Shell scripts copied to {user_shell_dir}[/dim]")
         else:
             console.print("[bold red]Unable to locate shell scripts in package.[/bold red]")
-            raise typer.Exit(1)
+            return "failed"
     except Exception as e:
         console.print(f"[bold red]Failed to copy shell scripts:[/bold red] {e}")
-        raise typer.Exit(1)
+        return "failed"
 
     # Run install script from user directory
     console.print(f"[bold blue]Installing {shell_name} shell integration...[/bold blue]")
@@ -875,9 +933,9 @@ def setup_callback(value: bool):
         )
     except subprocess.CalledProcessError as exc:
         console.print("[bold red]Shell integration setup failed.[/bold red]")
-        raise typer.Exit(exc.returncode) from exc
+        return "failed"
 
-    raise typer.Exit()
+    return "installed"
 
 
 @app.callback(invoke_without_command=True)
@@ -890,7 +948,7 @@ def main(
         "-d",
         help="Enable debug output and detailed error information",
     ),
-    config_file: Optional[str] = typer.Option(None, "--config-file", "-c", help="Path to custom configuration file"),
+    config_file: Optional[str] = typer.Option(None, "--config-file", "-f", help="Path to custom configuration file"),
     model: Optional[str] = typer.Option(
         None,
         "--model",
@@ -903,16 +961,17 @@ def main(
         "-p",
         help="Override LLM provider (openai, anthropic, google)",
     ),
-    no_confirm: bool = typer.Option(False, "--no-confirm", "-y", help="Skip confirmation prompts for tool calls"),
     new_session: bool = typer.Option(
         False,
         "--new-session",
+        "-n",
         help="Start a new conversation session for this invocation.",
     ),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Minimize output, show only results"),
     version: Optional[bool] = typer.Option(
         None,
         "--version",
+        "-v",
         callback=version_callback,
         is_eager=True,
         help="Show version information and exit.",
@@ -920,27 +979,23 @@ def main(
     show_config: Optional[bool] = typer.Option(
         None,
         "--show-config",
+        "-s",
         callback=show_config_callback,
         is_eager=True,
         help="Show current configuration and exit.",
     ),
-    setup: Optional[bool] = typer.Option(
-        None,
-        "--setup",
-        callback=setup_callback,
-        is_eager=True,
-        help="Install shell integration and exit.",
-    ),
     configure: Optional[bool] = typer.Option(
         None,
         "--config",
+        "-c",
         callback=config_callback,
         is_eager=True,
-        help="Interactively configure model provider and model.",
+        help="Configure Hash CLI and install shell integration if needed.",
     ),
     add_cmd: Optional[str] = typer.Option(
         None,
         "--add-cmd",
+        "-a",
         help="Install a slash-command plugin from a .py file or folder.",
     ),
 ):
@@ -981,8 +1036,6 @@ def main(
         # Update config with CLI options
         if provider:
             config.llm_provider = LLMProvider(provider)
-        if no_confirm:
-            config.require_confirmation = False
 
         query_policy = _build_query_execution_policy(raw_input, input_text, config.require_confirmation)
 
@@ -1008,7 +1061,7 @@ def main(
 
     except ConfigurationError as e:
         handle_error(e, debug)
-        console.print("\n[bold]Tip:[/bold] Run `hashcli --setup` to get started.")
+        console.print("\n[bold]Tip:[/bold] Run `hashcli --config` to get started.")
         raise typer.Exit(1)
     except Exception as e:
         handle_error(e, debug)

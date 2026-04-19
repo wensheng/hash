@@ -2,12 +2,12 @@
 
 # Hash CLI
 
-### Your AI Terminal Assistant That Actually Gets Things Done
+### Your AI Command Assistant for the Terminal
 
-Talk to your terminal in plain English. Get instant help with commands, debug errors, analyze code, and automate workflows—all without leaving your shell.
+Talk to your terminal in plain English. Get instant help with commands, examples, and safe execution suggestions without leaving your shell.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://badge.fury.io/py/hashcli.svg)](https://badge.fury.io/py/hashcli)
 
 [Quick Start](#quick-start) • [Features](#features) • [Examples](#real-world-examples) • [Plugins](#extensible-plugin-system) • [Docs](#configuration)
@@ -18,18 +18,18 @@ Talk to your terminal in plain English. Get instant help with commands, debug er
 
 ## What is Hash CLI?
 
-Hash CLI transforms your terminal into an intelligent workspace. Instead of memorizing commands, googling syntax, or switching between tabs, just ask your terminal what to do in natural language. Hash CLI understands your intent, executes commands safely, and learns your workflow.
+Hash CLI turns your terminal into a command assistant. Instead of memorizing commands, googling syntax, or switching between tabs, just ask your terminal what to do in natural language. Hash CLI explains commands, suggests the right invocation, and executes safely when you want it to.
 
 **Stop doing this:**
 ```bash
 # Opens browser, searches "how to find large files linux"
 # Copies command, pastes back
-# Gets error, searches again...
+# Searches again for a different flag combination...
 ```
 
 **Start doing this:**
 ```bash
-# find all files larger than 100MB in my home directory
+# find all files larger than 10MB in current directory
 ```
 
 Hash CLI figures out the command, shows you what it will run, and executes it with your approval.
@@ -39,7 +39,7 @@ Hash CLI figures out the command, shows you what it will run, and executes it wi
 ## Why Choose Hash CLI?
 
 ### **Work Faster**
-No more context switching. Ask questions, debug errors, and execute commands without leaving your terminal. Hash CLI integrates seamlessly into your existing workflow with optional `#` prefix support.
+No more context switching. Ask command questions, get examples, and execute commands without leaving your terminal. Hash CLI integrates seamlessly into your existing workflow with optional `#` prefix support.
 
 ### **Stay Safe**
 Built-in guardrails protect your system. Every destructive operation requires confirmation. Commands are checked against allow/deny lists. Dangerous patterns are blocked automatically.
@@ -74,21 +74,9 @@ pip install hashcli
 
 ### Setup
 
-Set up shell integration for the magical `#` prefix:
+Run the guided setup to configure your provider and install shell integration for the magical `#` prefix:
 
 ```bash
-hashcli --setup
-```
-
-Configure your API key (choose one):
-
-```bash
-# Option 1: Set environment variable
-export ANTHROPIC_API_KEY="your-key-here"
-export OPENAI_API_KEY="your-key-here"
-export GOOGLE_API_KEY="your-key-here"
-
-# Option 2: Use interactive setup wizard
 hashcli --config
 ```
 
@@ -100,32 +88,22 @@ That's it! Now start asking:
 # show disk usage in human readable format
 # what git branches exist and which one am I on
 # find all python files modified in the last week
-# explain what this error means: "ModuleNotFoundError: No module named 'requests'"
+# explain xargs
 ```
 
 ---
 
 ## Real-World Examples
 
-### Debugging & Troubleshooting
+### Command Discovery
 
 ```bash
-# my docker container keeps crashing, help me debug it
-# why is port 8080 already in use and how do I fix it
-# my git push was rejected, what should I do
+# explain tar
+# what command finds files larger than 100MB
+# show me examples for rsync
 ```
 
-Hash CLI analyzes the situation, checks logs, and suggests solutions.
-
-### Code Analysis & Understanding
-
-```bash
-# analyze the code quality of src/main.py
-# what does this function do? <paste code>
-# find all TODO comments in this project
-```
-
-Get instant insights with AST-based analysis for Python and metrics for JavaScript/Java.
+Hash CLI explains the command, grounds the answer with concise examples, and suggests the right invocation.
 
 ### System Administration
 
@@ -141,8 +119,8 @@ Perfect for sysadmins who want intelligent assistance without memorizing every f
 
 ```bash
 # show last 10 commits with author names
-# find files that import pandas but don't use it
-# what's the difference between staging and production config
+# what command shows my current git branch
+# find all python files modified in the last week
 ```
 
 Streamline your daily development tasks with natural language.
@@ -151,8 +129,8 @@ Streamline your daily development tasks with natural language.
 
 ```bash
 # how do I use awk to extract the third column
-# show me examples of python decorators
-# what's the difference between RUN and CMD in Dockerfile
+# explain grep -E
+# show me examples of find with -mtime
 ```
 
 Your terminal becomes a patient teacher, explaining concepts and showing examples.
@@ -163,7 +141,7 @@ Your terminal becomes a patient teacher, explaining concepts and showing example
 
 ### Natural Language Interface
 
-Ask questions, describe problems, and give instructions in plain English. Hash CLI translates your intent into precise commands and actions.
+Ask command questions and give shell-oriented instructions in plain English. Hash CLI translates your intent into precise commands and actions.
 
 ### Multi-Provider AI Support
 
@@ -177,10 +155,8 @@ Switch models and providers instantly with CLI flags or config files.
 
 Hash CLI can:
 - **Execute shell commands** with timeout protection and security checks
-- **Read and write files** with safety confirmations
-- **Search the web** via DuckDuckGo for up-to-date information
-- **Analyze code** with AST parsing for Python and metrics for JS/Java
-- **Navigate directories** and inspect file structures
+- **Explain commands** and suggest safe invocations
+- **Ground command answers** with integrated `tldr` examples when needed
 
 Every tool action is transparent and requires your approval.
 
@@ -249,7 +225,7 @@ Hash CLI is designed with security as a first-class feature:
 - No hidden actions or background processes
 
 **Configurable Paranoia**
-- Use `--no-confirm` only when you trust the workflow
+- Configure confirmation behavior in `~/.hashcli/config.toml`
 - Customize allow/deny lists per environment
 - Set timeouts to prevent runaway processes
 
@@ -358,8 +334,7 @@ Plugins are stored in `~/.hashcli/plugins/` and loaded automatically on startup.
 hashcli "your question here"
 
 # Configuration
-hashcli --config          # Guided setup wizard
-hashcli --setup           # Install shell integration
+hashcli --config          # Guided setup wizard + shell integration
 hashcli --show-config     # Display current settings
 
 # Plugin management
@@ -373,7 +348,6 @@ hashcli /model list       # List available models (with plugin)
 # Flags
 --model MODEL             # Override model
 --provider PROVIDER       # Override provider (openai/anthropic/google)
---no-confirm, -y          # Skip confirmations (use with caution)
 --new-session             # Start a fresh conversation for this run
 --debug, -d               # Enable debug output
 --quiet, -q               # Minimal output
