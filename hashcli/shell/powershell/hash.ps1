@@ -19,12 +19,12 @@ Import-Module PSReadLine -Force
 
 # Global variables for Hash integration
 $HashConfig = @{
-    ExecutablePath = "hcli"
+    ExecutablePath = "hashcli"
     HistoryFile = "$env:USERPROFILE\.hashcli\powershell_history.json"
     EnableLogging = $false
 }
 
-# Function to handle detection and execution for lines containing #
+# Function to handle detection and execution for lines starting with a single #
 function Invoke-HashCommand {
     [CmdletBinding()]
     param(
@@ -33,13 +33,15 @@ function Invoke-HashCommand {
         [int]$CursorPosition
     )
 
-    # Ignore lines containing '##' and let shell handle comments normally.
-    if ($Buffer -match '##') {
+    $trimmedBuffer = $Buffer.TrimStart()
+
+    # Keep ## as a plain shell comment escape.
+    if ($trimmedBuffer.StartsWith('##')) {
         return $false
     }
 
-    # Intercept command line containing '#'
-    if ($Buffer -match '#') {
+    # Intercept command lines starting with a single '#'.
+    if ($trimmedBuffer.StartsWith('#')) {
         $command = $Buffer
 
         if ($command) {
@@ -153,12 +155,12 @@ function Test-HashIntegration {
 
     Write-Host "Testing Hash CLI integration..."
 
-    # Check if hcli is available
+    # Check if hashcli is available
     try {
         $version = & $HashConfig.ExecutablePath --version 2>&1
-        Write-Host "✓ hcli executable found: $version" -ForegroundColor Green
+        Write-Host "✓ hashcli executable found: $version" -ForegroundColor Green
     } catch {
-        Write-Host "✗ hcli executable not found" -ForegroundColor Red
+        Write-Host "✗ hashcli executable not found" -ForegroundColor Red
         return $false
     }
 

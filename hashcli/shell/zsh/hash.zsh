@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 # Hash CLI Integration for zsh
-# This script enables interception for any command line containing #
+# This script enables interception for command lines starting with a single #
 
 if [[ -z "$HASHCLI_SESSION_ID" ]]; then
     export HASHCLI_SESSION_ID=$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || echo "$$-$(date +%s)")
@@ -8,24 +8,20 @@ fi
 
 # Create hash-magic-execute widget
 hash-magic-execute() {
-    # Ignore lines containing '##' by executing only the part before it.
-    if [[ "$BUFFER" == *"##"* ]]; then
-        local command_before_comment="${BUFFER%%##*}"
-        if [[ -z "${command_before_comment//[[:space:]]/}" ]]; then
-            BUFFER=""
-            zle reset-prompt
-        else
-            BUFFER="$command_before_comment"
-            zle .accept-line
-        fi
-    # Intercept command line containing '#'
-    elif [[ "$BUFFER" == *"#"* ]]; then
+    local trimmed_buffer="${BUFFER#"${BUFFER%%[![:space:]]*}"}"
+
+    # Keep ## as a plain shell comment escape.
+    if [[ "$trimmed_buffer" == "##"* ]]; then
+        BUFFER=""
+        zle reset-prompt
+    # Intercept command lines starting with a single '#'.
+    elif [[ "$trimmed_buffer" == "#"* ]]; then
         # Save the original buffer for history
         local original_buffer="$BUFFER"
 
         # Execute hashcli with the full original command line
         zle -I
-        hcli "$original_buffer" < /dev/tty
+        hashcli "$original_buffer" < /dev/tty
         local exit_code=$?
         echo
         echo  # in zsh last line got cut off, not sure why.
@@ -53,8 +49,8 @@ bindkey '^M' hash-magic-execute  # Bind to Enter key
 
 # Function to check if hashcli is available
 hash-check-availability() {
-    if ! command -v hcli >/dev/null 2>&1; then
-        echo "Warning: hcli command not found. Please ensure Hash CLI is installed and in your PATH."
+    if ! command -v hashcli >/dev/null 2>&1; then
+        echo "Warning: hashcli command not found. Please ensure Hash CLI is installed and in your PATH."
         return 1
     fi
     return 0

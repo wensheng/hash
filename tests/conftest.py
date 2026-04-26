@@ -25,7 +25,8 @@ def sample_config():
         openai_api_key="test-key-123",
         openai_model="gpt-4",
         allow_command_execution=True,
-        require_confirmation=False,  # Disable for testing
+        command_confirmation=False,  # Disable for testing
+        tool_confirmation=False,  # Disable for testing
         history_enabled=True,
         show_debug=False,
     )

@@ -86,16 +86,19 @@ class AnthropicProvider(LLMProvider):
 
         except anthropic.RateLimitError:
             return LLMResponse(
-                content="Rate limit exceeded. Please try again in a moment.",
+                content="Anthropic rate limit exceeded. Please try again in a moment or choose a different model.",
                 model=self.model,
             )
         except anthropic.AuthenticationError:
             return LLMResponse(
-                content="Authentication failed. Please check your Anthropic API key.",
+                content='Authentication failed. Please check your Anthropic API key. Run "hi --config" to set this up interactively.',
                 model=self.model,
             )
         except anthropic.APIError as e:
-            return LLMResponse(content=f"Anthropic API error: {str(e)}", model=self.model)
+            error_text = str(e)
+            if "model" in error_text.lower() or "404" in error_text:
+                error_text = f'{error_text} Check the configured Anthropic model or run "hi --config".'
+            return LLMResponse(content=f"Anthropic API error: {error_text}", model=self.model)
         except Exception as e:
             return LLMResponse(content=f"Unexpected error: {str(e)}", model=self.model)
 
@@ -134,16 +137,18 @@ class AnthropicProvider(LLMProvider):
                     # Add tool_use blocks for each tool call
                     for tc in tool_calls:
                         func = tc.get("function", {})
-                        content_blocks.append({
-                            "type": "tool_use",
-                            "id": tc.get("id", tc.get("call_id", "")),
-                            "name": func.get("name", ""),
-                            "input": (
-                                json.loads(func["arguments"])
-                                if isinstance(func.get("arguments"), str)
-                                else func.get("arguments", {})
-                            ),
-                        })
+                        content_blocks.append(
+                            {
+                                "type": "tool_use",
+                                "id": tc.get("id", tc.get("call_id", "")),
+                                "name": func.get("name", ""),
+                                "input": (
+                                    json.loads(func["arguments"])
+                                    if isinstance(func.get("arguments"), str)
+                                    else func.get("arguments", {})
+                                ),
+                            }
+                        )
                     anthropic_messages.append({"role": role, "content": content_blocks})
                 elif content:
                     # Regular assistant message with just text
@@ -154,14 +159,18 @@ class AnthropicProvider(LLMProvider):
                 # Convert tool result to user message with tool_result content block
                 tool_call_id = message.get("tool_call_id", message.get("call_id", ""))
                 if tool_call_id:
-                    anthropic_messages.append({
-                        "role": "user",
-                        "content": [{
-                            "type": "tool_result",
-                            "tool_use_id": tool_call_id,
-                            "content": content,
-                        }],
-                    })
+                    anthropic_messages.append(
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_call_id,
+                                    "content": content,
+                                }
+                            ],
+                        }
+                    )
                 else:
                     # Fallback for messages without tool_call_id
                     anthropic_messages.append({"role": "user", "content": f"Tool result: {content}"})
@@ -175,11 +184,13 @@ class AnthropicProvider(LLMProvider):
         for tool in tools:
             if tool["type"] == "function":
                 func = tool["function"]
-                anthropic_tools.append({
-                    "name": func["name"],
-                    "description": func["description"],
-                    "input_schema": func["parameters"],
-                })
+                anthropic_tools.append(
+                    {
+                        "name": func["name"],
+                        "description": func["description"],
+                        "input_schema": func["parameters"],
+                    }
+                )
 
         return anthropic_tools
 

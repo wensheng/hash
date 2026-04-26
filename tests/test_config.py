@@ -6,9 +6,12 @@ import tempfile
 from pathlib import Path
 
 from hashcli.config import (
+    ConfigurationError,
     HashConfig,
     LLMProvider,
     load_configuration,
+    parse_config_value,
+    remove_config_keys,
     save_config,
     update_config_values,
     get_config_paths,
@@ -26,7 +29,8 @@ class TestHashConfig:
         assert config.llm_provider == LLMProvider.GOOGLE
         assert config.openai_model == "gpt-5-nano"
         assert config.allow_command_execution is True
-        assert config.require_confirmation is False
+        assert config.command_confirmation is False
+        assert config.tool_confirmation is False
         assert config.allow_shell_operators is True
         assert config.history_enabled is True
         assert config.rich_output is True
@@ -80,7 +84,8 @@ class TestConfigurationLoading:
         os.environ["HASHCLI_LLM_PROVIDER"] = "anthropic"
         os.environ["HASHCLI_ANTHROPIC_MODEL"] = "claude-3-opus"
         os.environ["HASHCLI_ALLOW_COMMAND_EXECUTION"] = "false"
-        os.environ["HASHCLI_REQUIRE_CONFIRMATION"] = "true"
+        os.environ["HASHCLI_COMMAND_CONFIRMATION"] = "true"
+        os.environ["HASHCLI_TOOL_CONFIRMATION"] = "false"
         os.environ["HASHCLI_ALLOW_SHELL_OPERATORS"] = "true"
 
         try:
@@ -89,7 +94,8 @@ class TestConfigurationLoading:
             assert env_config["llm_provider"] == "anthropic"
             assert env_config["anthropic_model"] == "claude-3-opus"
             assert env_config["allow_command_execution"] is False
-            assert env_config["require_confirmation"] is True
+            assert env_config["command_confirmation"] is True
+            assert env_config["tool_confirmation"] is False
             assert env_config["allow_shell_operators"] is True
 
         finally:
@@ -98,11 +104,25 @@ class TestConfigurationLoading:
                 "HASHCLI_LLM_PROVIDER",
                 "HASHCLI_ANTHROPIC_MODEL",
                 "HASHCLI_ALLOW_COMMAND_EXECUTION",
-                "HASHCLI_REQUIRE_CONFIRMATION",
+                "HASHCLI_COMMAND_CONFIRMATION",
+                "HASHCLI_TOOL_CONFIRMATION",
                 "HASHCLI_ALLOW_SHELL_OPERATORS",
             ]:
                 if key in os.environ:
                     del os.environ[key]
+
+    def test_load_environment_variables_maps_legacy_require_confirmation(self):
+        """Legacy confirmation env var should map to both split settings."""
+        os.environ["HASHCLI_REQUIRE_CONFIRMATION"] = "true"
+
+        try:
+            env_config = load_environment_variables()
+
+            assert "require_confirmation" not in env_config
+            assert env_config["command_confirmation"] is True
+            assert env_config["tool_confirmation"] is True
+        finally:
+            del os.environ["HASHCLI_REQUIRE_CONFIRMATION"]
 
     def test_load_configuration_with_overrides(self):
         """Test configuration loading with parameter overrides."""
@@ -110,6 +130,16 @@ class TestConfigurationLoading:
 
         assert config.show_debug is True
         assert config.openai_model == "gpt-3.5-turbo"
+
+    def test_load_configuration_maps_legacy_require_confirmation(self, temp_dir):
+        """Legacy require_confirmation should map to both split confirmation settings."""
+        config_path = temp_dir / "config.toml"
+        config_path.write_text("require_confirmation = true\n", encoding="utf-8")
+
+        config = load_configuration(config_file=str(config_path))
+
+        assert config.command_confirmation is True
+        assert config.tool_confirmation is True
 
     def test_save_and_load_config(self, temp_dir):
         """Test saving and loading configuration files."""
@@ -173,11 +203,13 @@ class TestConfigurationLoading:
 
         config_path = temp_dir / "config.toml"
         config_path.write_text(
-            "\n".join([
-                'openai_api_key = "file-openai-key"',
-                'anthropic_api_key = "file-anthropic-key"',
-                'google_api_key = "file-google-key"',
-            ])
+            "\n".join(
+                [
+                    'openai_api_key = "file-openai-key"',
+                    'anthropic_api_key = "file-anthropic-key"',
+                    'google_api_key = "file-google-key"',
+                ]
+            )
             + "\n",
             encoding="utf-8",
         )
@@ -192,13 +224,15 @@ class TestConfigurationLoading:
         """Targeted config updates should not rewrite unrelated settings or strip comments."""
         config_path = temp_dir / "config.toml"
         config_path.write_text(
-            "\n".join([
-                "# user note",
-                'streaming = true',
-                'openai_model = "old-model"',
-                'openai_api_key = "old-key"',
-                '# another note',
-            ])
+            "\n".join(
+                [
+                    "# user note",
+                    "streaming = true",
+                    'openai_model = "old-model"',
+                    'openai_api_key = "old-key"',
+                    "# another note",
+                ]
+            )
             + "\n",
             encoding="utf-8",
         )
@@ -220,6 +254,33 @@ class TestConfigurationLoading:
         assert 'openai_model = "gpt-5-mini"' in content
         assert 'openai_api_key = "new-key"' in content
         assert 'llm_provider = "openai"' in content
+
+    def test_remove_config_keys_preserves_comments(self, temp_dir):
+        """Unset helper should remove assignments without stripping comments."""
+        config_path = temp_dir / "config.toml"
+        config_path.write_text(
+            '# note\nstreaming = true\nopenai_model = "old"\n# keep\n',
+            encoding="utf-8",
+        )
+
+        assert remove_config_keys(["streaming"], config_path=config_path) is True
+
+        content = config_path.read_text(encoding="utf-8")
+        assert "# note" in content
+        assert "# keep" in content
+        assert "streaming =" not in content
+        assert 'openai_model = "old"' in content
+
+    def test_parse_config_value_by_field_type(self):
+        """CLI config values should parse according to target field type."""
+        assert parse_config_value("streaming", "true") is True
+        assert parse_config_value("max_response_tokens", "2048") == 2048
+        assert parse_config_value("blocked_commands", '["rm -rf", "sudo"]') == ["rm -rf", "sudo"]
+        assert parse_config_value("openai_model", "gpt-custom") == "gpt-custom"
+        assert parse_config_value("llm_provider", "anthropic") == "anthropic"
+
+        with pytest.raises(ConfigurationError):
+            parse_config_value("streaming", "sometimes")
 
 
 class TestProviderEnum:

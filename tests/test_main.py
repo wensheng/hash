@@ -96,19 +96,22 @@ def test_config_wizard_preserves_existing_comments_and_unrelated_settings(mocker
     config_dir.mkdir(parents=True)
     config_path = config_dir / "config.toml"
     config_path.write_text(
-        "\n".join([
-            "# keep this comment",
-            "streaming = true",
-            'openai_model = "old-model"',
-        ])
+        "\n".join(
+            [
+                "# keep this comment",
+                "streaming = true",
+                'openai_model = "old-model"',
+            ]
+        )
         + "\n",
         encoding="utf-8",
     )
 
     mocker.patch("hashcli.config.Path.home", return_value=mock_home)
     mocker.patch("hashcli.main.ensure_shell_integration", return_value="skipped")
+    mocker.patch("hashcli.main._validate_setup_provider", mocker.AsyncMock(return_value=(True, "ok")))
 
-    result = runner.invoke(app, ["--config"], input="1\nsecret-key\n")
+    result = runner.invoke(app, ["--config"], input="1\nsecret-key\ny\n")
 
     assert result.exit_code == 0
     content = config_path.read_text(encoding="utf-8")
@@ -146,8 +149,9 @@ def test_config_runs_shell_setup_when_not_installed(mocker, tmp_path):
 
     mock_run = mocker.patch("hashcli.main.subprocess.run")
     mocker.patch("hashcli.config.Path.home", return_value=tmp_path)
+    mocker.patch("hashcli.main._validate_setup_provider", mocker.AsyncMock(return_value=(True, "ok")))
 
-    result = runner.invoke(app, ["--config"], input="1\n1\nsecret-key\n", env={"SHELL": "/bin/zsh"})
+    result = runner.invoke(app, ["--config"], input="1\n1\nsecret-key\nn\n", env={"SHELL": "/bin/zsh"})
     assert result.exit_code == 0
     assert "Installing zsh shell integration" in result.stdout
     assert mock_run.called
@@ -169,8 +173,9 @@ def test_config_skips_shell_setup_when_already_installed(mocker, tmp_path):
     mocker.patch("hashcli.main.Path.home", return_value=mock_home)
     mocker.patch("hashcli.config.Path.home", return_value=mock_home)
     mock_run = mocker.patch("hashcli.main.subprocess.run")
+    mocker.patch("hashcli.main._validate_setup_provider", mocker.AsyncMock(return_value=(True, "ok")))
 
-    result = runner.invoke(app, ["--config"], input="1\n1\nsecret-key\n", env={"SHELL": "/bin/zsh"})
+    result = runner.invoke(app, ["--config"], input="1\n1\nsecret-key\nn\n", env={"SHELL": "/bin/zsh"})
 
     assert result.exit_code == 0
     assert "already configured, skipping" in result.stdout
@@ -192,17 +197,19 @@ def test_add_cmd_installs_valid_plugin_file(mocker, tmp_path):
     """--add-cmd should validate and install a plugin file."""
     plugin_file = tmp_path / "hello.py"
     plugin_file.write_text(
-        "\n".join([
-            "from typing import List",
-            "from hashcli.command_proxy import Command",
-            "",
-            "class HelloCommand(Command):",
-            "    def execute(self, args: List[str]) -> str:",
-            "        return 'hello world'",
-            "",
-            "    def get_help(self) -> str:",
-            "        return 'say hello'",
-        ])
+        "\n".join(
+            [
+                "from typing import List",
+                "from hashcli.command_proxy import Command",
+                "",
+                "class HelloCommand(Command):",
+                "    def execute(self, args: List[str]) -> str:",
+                "        return 'hello world'",
+                "",
+                "    def get_help(self) -> str:",
+                "        return 'say hello'",
+            ]
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -211,7 +218,7 @@ def test_add_cmd_installs_valid_plugin_file(mocker, tmp_path):
     mock_home.mkdir()
     mocker.patch("hashcli.command_proxy.Path.home", return_value=mock_home)
 
-    result = runner.invoke(app, ["--add-cmd", str(plugin_file)])
+    result = runner.invoke(app, ["--add-cmd", str(plugin_file), "--yes"])
 
     installed_file = mock_home / ".hashcli" / "plugins" / "hello.py"
     assert result.exit_code == 0
@@ -232,18 +239,20 @@ def test_add_cmd_accepts_directory_with_single_plugin_file(mocker, tmp_path):
     plugin_dir.mkdir()
     plugin_file = plugin_dir / "goodbye.py"
     plugin_file.write_text(
-        "\n".join([
-            "from typing import List",
-            "from hashcli.command_proxy import Command",
-            "from hashcli.config import HashConfig",
-            "",
-            "class GoodbyeCommand(Command):",
-            "    def execute(self, args: List[str], config: HashConfig) -> str:",
-            "        return 'bye'",
-            "",
-            "    def get_help(self) -> str:",
-            "        return 'say bye'",
-        ])
+        "\n".join(
+            [
+                "from typing import List",
+                "from hashcli.command_proxy import Command",
+                "from hashcli.config import HashConfig",
+                "",
+                "class GoodbyeCommand(Command):",
+                "    def execute(self, args: List[str], config: HashConfig) -> str:",
+                "        return 'bye'",
+                "",
+                "    def get_help(self) -> str:",
+                "        return 'say bye'",
+            ]
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -252,7 +261,7 @@ def test_add_cmd_accepts_directory_with_single_plugin_file(mocker, tmp_path):
     mock_home.mkdir()
     mocker.patch("hashcli.command_proxy.Path.home", return_value=mock_home)
 
-    result = runner.invoke(app, ["--add-cmd", str(plugin_dir)])
+    result = runner.invoke(app, ["--add-cmd", str(plugin_dir), "--yes"])
 
     installed_file = mock_home / ".hashcli" / "plugins" / "goodbye.py"
     assert result.exit_code == 0
@@ -264,10 +273,12 @@ def test_add_cmd_rejects_plugin_without_command_subclass(mocker, tmp_path):
     """--add-cmd should fail if plugin file has no Command subclass."""
     bad_plugin = tmp_path / "bad.py"
     bad_plugin.write_text(
-        "\n".join([
-            "class NotACommand:",
-            "    pass",
-        ])
+        "\n".join(
+            [
+                "class NotACommand:",
+                "    pass",
+            ]
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -288,7 +299,7 @@ def test_add_cmd_installs_repo_plugins_config_command(mocker, tmp_path):
     mock_home.mkdir()
     mocker.patch("hashcli.command_proxy.Path.home", return_value=mock_home)
 
-    result = runner.invoke(app, ["--add-cmd", "plugins/hello.py"])
+    result = runner.invoke(app, ["--add-cmd", "plugins/hello.py", "--yes"])
 
     installed_file = mock_home / ".hashcli" / "plugins" / "hello.py"
     assert result.exit_code == 0
@@ -300,6 +311,118 @@ def test_add_cmd_installs_repo_plugins_config_command(mocker, tmp_path):
     proxy = CommandProxy(HashConfig())
     assert "hello" in proxy.get_available_commands()
     assert "Hello from" in proxy.execute("/hello")
+
+
+def test_add_cmd_requires_yes_for_noninteractive_install(mocker, tmp_path):
+    """Non-interactive plugin installs should require --yes."""
+    plugin_file = tmp_path / "hello.py"
+    plugin_file.write_text(
+        "\n".join(
+            [
+                "from typing import List",
+                "from hashcli.command_proxy import Command",
+                "",
+                "class HelloCommand(Command):",
+                "    def execute(self, args: List[str]) -> str:",
+                "        return 'hello world'",
+                "",
+                "    def get_help(self) -> str:",
+                "        return 'say hello'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    mock_home = tmp_path / "home"
+    mock_home.mkdir()
+    mocker.patch("hashcli.command_proxy.Path.home", return_value=mock_home)
+
+    result = runner.invoke(app, ["--add-cmd", str(plugin_file)])
+
+    assert result.exit_code == 1
+    assert "without --yes" in result.stdout
+    assert not (mock_home / ".hashcli" / "plugins" / "hello.py").exists()
+
+
+def test_add_cmd_subprocess_validation_failure_does_not_install(mocker, tmp_path):
+    """Plugins that fail import validation should not be copied into the plugin dir."""
+    plugin_file = tmp_path / "bad_import.py"
+    plugin_file.write_text("raise RuntimeError('boom')\n", encoding="utf-8")
+    mock_home = tmp_path / "home"
+    mock_home.mkdir()
+    mocker.patch("hashcli.command_proxy.Path.home", return_value=mock_home)
+
+    result = runner.invoke(app, ["--add-cmd", str(plugin_file), "--yes"])
+
+    assert result.exit_code == 1
+    assert "Plugin validation failed before install" in result.stdout
+    assert not (mock_home / ".hashcli" / "plugins" / "bad_import.py").exists()
+
+
+def test_list_plugins_and_remove_cmd(mocker, tmp_path):
+    """Installed plugins should be discoverable and removable."""
+    mock_home = tmp_path / "home"
+    plugin_dir = mock_home / ".hashcli" / "plugins"
+    plugin_dir.mkdir(parents=True)
+    plugin_file = plugin_dir / "hello.py"
+    plugin_file.write_text(
+        "\n".join(
+            [
+                "from typing import List",
+                "from hashcli.command_proxy import Command",
+                "",
+                "class HelloCommand(Command):",
+                "    def execute(self, args: List[str]) -> str:",
+                "        return 'hello world'",
+                "",
+                "    def get_help(self) -> str:",
+                "        return 'say hello'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    mocker.patch("hashcli.command_proxy.Path.home", return_value=mock_home)
+
+    listed = runner.invoke(app, ["--list-plugins"])
+    removed = runner.invoke(app, ["--remove-cmd", "hello", "--yes"])
+
+    assert listed.exit_code == 0
+    assert "/hello" in listed.stdout
+    assert "HelloCommand" in listed.stdout
+    assert removed.exit_code == 0
+    assert not plugin_file.exists()
+
+
+def test_completion_commands_include_installed_plugins(mocker, tmp_path):
+    """Completion command output should include dynamically installed plugin commands."""
+    mock_home = tmp_path / "home"
+    plugin_dir = mock_home / ".hashcli" / "plugins"
+    plugin_dir.mkdir(parents=True)
+    plugin_file = plugin_dir / "hello.py"
+    plugin_file.write_text(
+        "\n".join(
+            [
+                "from typing import List",
+                "from hashcli.command_proxy import Command",
+                "",
+                "class HelloCommand(Command):",
+                "    def execute(self, args: List[str]) -> str:",
+                "        return 'hello world'",
+                "",
+                "    def get_help(self) -> str:",
+                "        return 'say hello'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    mocker.patch("hashcli.command_proxy.Path.home", return_value=mock_home)
+
+    result = runner.invoke(app, ["--completion-commands"])
+
+    assert result.exit_code == 0
+    assert "hello\tsay hello" in result.stdout
 
 
 def test_normalize_shell_input_leading_hash_query():
@@ -326,10 +449,10 @@ def test_build_query_execution_policy_how_to_forces_confirmation():
     policy = _build_query_execution_policy(
         "# how to find all __pycache__ in current dir",
         normalized,
-        require_confirmation=False,
+        command_confirmation=False,
     )
     assert policy.force_tool_confirmation is True
-    assert policy.suggested_command_confirmation is True
+    assert policy.command_confirmation is True
     assert policy.force_command_oriented is True
 
 
@@ -339,17 +462,17 @@ def test_build_query_execution_policy_action_query_respects_config():
     policy_false = _build_query_execution_policy(
         "# find all __pycache__ in current dir",
         normalized,
-        require_confirmation=False,
+        command_confirmation=False,
     )
     policy_true = _build_query_execution_policy(
         "# find all __pycache__ in current dir",
         normalized,
-        require_confirmation=True,
+        command_confirmation=True,
     )
     assert policy_false.force_tool_confirmation is None
-    assert policy_false.suggested_command_confirmation is False
+    assert policy_false.command_confirmation is False
     assert policy_true.force_tool_confirmation is None
-    assert policy_true.suggested_command_confirmation is True
+    assert policy_true.command_confirmation is True
 
 
 def test_build_query_execution_policy_command_hint_disables_confirmation():
@@ -358,10 +481,10 @@ def test_build_query_execution_policy_command_hint_disables_confirmation():
     policy = _build_query_execution_policy(
         "find # all __pycache__ folders",
         normalized,
-        require_confirmation=True,
+        command_confirmation=True,
     )
     assert policy.force_tool_confirmation is False
-    assert policy.suggested_command_confirmation is False
+    assert policy.command_confirmation is False
     assert policy.force_command_oriented is True
 
 
@@ -425,6 +548,24 @@ def test_resolve_conversation_session_id_new_session_overrides_existing(mocker):
 
     assert resolved == str(forced_uuid)
     assert resolved != "env-session"
+
+
+def test_resolve_conversation_session_id_requested_prefix(sample_config, temp_dir):
+    """--session should resolve a unique historical session prefix."""
+    from hashcli.history import ConversationHistory
+
+    sample_config.history_dir = temp_dir / "history"
+    history = ConversationHistory(sample_config.history_dir)
+    session_id = "abcdef12-1234-1234-1234-123456789abc"
+    history.start_session(session_id=session_id)
+
+    assert _resolve_conversation_session_id(requested_session_id="abcdef12", config=sample_config) == session_id
+
+
+def test_resolve_conversation_session_id_rejects_new_session_conflict(sample_config):
+    """--session and --new-session are mutually exclusive."""
+    with pytest.raises(Exception, match="cannot be combined"):
+        _resolve_conversation_session_id(new_session=True, requested_session_id="abc", config=sample_config)
 
 
 def test_extract_suggested_command_ignores_general_knowledge_prose():
@@ -501,7 +642,7 @@ def test_main_routes_embedded_hash_to_enhanced_llm_mode(mocker):
     assert normalized_query.startswith("Task: all node_modules folders.")
     call_kwargs = llm_mode.call_args.kwargs
     assert call_kwargs["force_tool_confirmation"] is False
-    assert call_kwargs["suggested_command_confirmation"] is False
+    assert call_kwargs["command_confirmation"] is False
     assert call_kwargs["force_command_oriented"] is True
 
 
@@ -518,7 +659,7 @@ def test_main_new_session_routes_with_new_session_id(mocker):
     result = runner.invoke(app, ["--new-session", "hello"])
 
     assert result.exit_code == 0
-    mock_resolve.assert_called_once_with(new_session=True)
+    mock_resolve.assert_called_once_with(new_session=True, requested_session_id=None, config=config)
     assert llm_mode.call_args.kwargs["session_id"] == "new-session-id"
 
 
@@ -588,7 +729,7 @@ async def test_llm_mode_command_query_can_offer_execute_prompt(mocker):
     await execute_llm_mode("how do I list files", config)
 
     mock_maybe_execute.assert_awaited_once()
-    assert mock_maybe_execute.call_args.kwargs["require_confirmation"] is True
+    assert mock_maybe_execute.call_args.kwargs["command_confirmation"] is True
 
 
 @pytest.mark.asyncio
@@ -607,12 +748,12 @@ async def test_llm_mode_command_query_can_auto_execute_suggestion(mocker):
     await execute_llm_mode(
         "find all __pycache__ in current dir",
         config,
-        suggested_command_confirmation=False,
+        command_confirmation=False,
         force_command_oriented=True,
     )
 
     mock_maybe_execute.assert_awaited_once()
-    assert mock_maybe_execute.call_args.kwargs["require_confirmation"] is False
+    assert mock_maybe_execute.call_args.kwargs["command_confirmation"] is False
 
 
 @pytest.mark.asyncio
@@ -627,7 +768,7 @@ async def test_maybe_execute_suggested_command_uses_passthrough_output(mocker):
         config,
         quiet=True,
         user_query="clean up docker images Im not using",
-        require_confirmation=False,
+        command_confirmation=False,
     )
 
     mock_execute.assert_awaited_once()
@@ -639,7 +780,7 @@ async def test_maybe_execute_suggested_command_uses_passthrough_output(mocker):
 @pytest.mark.asyncio
 async def test_maybe_execute_suggested_command_prompts_for_destructive_command_even_when_disabled(mocker):
     """Destructive suggestions must still ask before executing."""
-    mock_confirm = mocker.patch("hashcli.main.Confirm.ask", return_value=False)
+    mocker.patch("hashcli.main._is_interactive_session", return_value=False)
     mock_execute = mocker.AsyncMock(return_value="")
     mocker.patch("hashcli.tools.shell.ShellTool.execute", mock_execute)
 
@@ -649,10 +790,9 @@ async def test_maybe_execute_suggested_command_prompts_for_destructive_command_e
         config,
         quiet=True,
         user_query="kill whatever is running on port 8080",
-        require_confirmation=False,
+        command_confirmation=False,
     )
 
-    mock_confirm.assert_called_once()
     mock_execute.assert_not_called()
 
 

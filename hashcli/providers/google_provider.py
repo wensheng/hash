@@ -183,9 +183,13 @@ class GoogleProvider(LLMProvider):
 
             # Handle specific Google AI errors - adapting strings as they might have changed
             if "API_KEY_INVALID" in error_message:
-                error_message = "Invalid Google AI API key. Please check your configuration."
+                error_message = 'Invalid Google AI API key. Please check your configuration. Run "hi --config" to set this up interactively.'
             elif "429" in error_message or "quota" in error_message.lower():
-                error_message = "API quota exceeded. Please try again later."
+                error_message = (
+                    "Google API quota or rate limit exceeded. Please try again later or choose a different model."
+                )
+            elif "model" in error_message.lower() or "404" in error_message:
+                error_message = f'{error_message} Check the configured Google model or run "hi --config".'
             elif "blocked" in error_message.lower():
                 error_message = "Content was blocked by Google's safety filters."
 
@@ -208,11 +212,7 @@ class GoogleProvider(LLMProvider):
         if not tools:
             return True
 
-        tool_names = {
-            tool.get("function", {}).get("name")
-            for tool in tools
-            if tool.get("type") == "function"
-        }
+        tool_names = {tool.get("function", {}).get("name") for tool in tools if tool.get("type") == "function"}
         tool_names.discard(None)
         return bool(tool_names and tool_names != {"lookup_tldr_command"})
 
@@ -285,8 +285,7 @@ class GoogleProvider(LLMProvider):
                 cleaned[key] = self._clean_parameter_schema(value)
             elif isinstance(value, list):
                 cleaned[key] = [
-                    self._clean_parameter_schema(item) if isinstance(item, dict) else item
-                    for item in value
+                    self._clean_parameter_schema(item) if isinstance(item, dict) else item for item in value
                 ]
             else:
                 cleaned[key] = value

@@ -17,6 +17,7 @@ class TestCommandProxy:
         available_commands = proxy.get_available_commands()
 
         expected_commands = [
+            "config",
             "help",
             "history",
         ]
@@ -141,6 +142,41 @@ class TestCommandProxy:
         assert first_id in result
         assert second_id in result
 
+    def test_history_search_finds_message_content(self, sample_config, temp_dir):
+        """History search should show matching snippets across sessions."""
+        sample_config.history_dir = temp_dir / "history"
+        history = ConversationHistory(sample_config.history_dir)
+        session_id = "abcdef12-1234-1234-1234-123456789abc"
+        history.start_session(title="Search Session", session_id=session_id)
+        history.add_message(session_id, "user", "how do I use rsync safely?")
+
+        proxy = CommandProxy(sample_config)
+        result = proxy.execute("/history search rsync")
+
+        assert "History matches for 'rsync'" in result
+        assert "abcdef12-123" in result
+        assert "USER" in result
+        assert "rsync safely" in result
+
+    def test_config_set_and_unset_command_preserves_comments(self, sample_config, temp_dir, mocker):
+        """Config command should persist typed values and unset them without rewriting the file."""
+        home = temp_dir / "home"
+        config_dir = home / ".hashcli"
+        config_dir.mkdir(parents=True)
+        config_path = config_dir / "config.toml"
+        config_path.write_text("# keep\nstreaming = false\n", encoding="utf-8")
+        mocker.patch("hashcli.config.Path.home", return_value=home)
+
+        proxy = CommandProxy(sample_config)
+        set_result = proxy.execute("/config set streaming true")
+        unset_result = proxy.execute("/config unset streaming")
+
+        assert set_result == "Set streaming."
+        assert unset_result == "Unset streaming."
+        content = config_path.read_text(encoding="utf-8")
+        assert "# keep" in content
+        assert "streaming =" not in content
+
 
 class TestHelpCommand:
     """Test the Help command."""
@@ -162,18 +198,20 @@ class TestHelpCommand:
         plugin_dir.mkdir(parents=True)
         plugin_file = plugin_dir / "hello.py"
         plugin_file.write_text(
-            "\n".join([
-                "from typing import List",
-                "from hashcli.command_proxy import Command",
-                "from hashcli.config import HashConfig",
-                "",
-                "class HelloCommand(Command):",
-                "    def execute(self, args: List[str], config: HashConfig) -> str:",
-                "        return 'hello'",
-                "",
-                "    def get_help(self) -> str:",
-                "        return 'hello help'",
-            ])
+            "\n".join(
+                [
+                    "from typing import List",
+                    "from hashcli.command_proxy import Command",
+                    "from hashcli.config import HashConfig",
+                    "",
+                    "class HelloCommand(Command):",
+                    "    def execute(self, args: List[str], config: HashConfig) -> str:",
+                    "        return 'hello'",
+                    "",
+                    "    def get_help(self) -> str:",
+                    "        return 'hello help'",
+                ]
+            )
             + "\n",
             encoding="utf-8",
         )

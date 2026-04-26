@@ -27,14 +27,15 @@ class HelpCommand(Command):
         proxy = CommandProxy(config)
         available = proxy.get_available_commands()
 
-        core_cmds = {"help", "history"}
+        core_cmds = {"help", "history", "config"}
         plugins = [cmd for cmd in available if cmd not in core_cmds]
 
         help_text = """Hash CLI - Command Mode
 
 CORE COMMANDS:
   /help [command]             - Show help (this message)
-  /history [options]          - Manage conversation history"""
+  /history [options]          - Manage conversation history
+  /config [get|set|unset]     - Manage configuration"""
 
         if plugins:
             help_text += "\n\nPLUGINS:"
@@ -46,8 +47,9 @@ CORE COMMANDS:
         help_text += """
 
 EXAMPLES:
-  # /help history
-  # /history list
+  hi /help history
+  hi /history list
+  hi config get streaming
 
 For command-specific help: /help <command>"""
 

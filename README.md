@@ -2,7 +2,7 @@
 
 # Hash
 
-### Your terminal, but with a brain. (Works with your current zsh, bash, fish, or powershell.)
+### Your terminal, but with a brain. (Works with your current zsh, bash, fish, or PowerShell.)
 
 Talk to your terminal in plain English. Get instant help with commands, examples, and safe execution suggestions without leaving your shell.  You never have to context-switch to a browser again.
 
@@ -29,9 +29,13 @@ Talk to your terminal in plain English. Get instant help with commands, examples
 
 `$ hi kill whatever is running on port 8888`
 ```bash
-I can do that, but it’s destructive. Confirm and I’ll run it.
-──────────────────────────────────────────────────────────────
-do you want execute `lsof -ti :8888 | xargs kill -9`? [y/n] (n): y
+Suggested command
+Description: Finds process IDs listening on port 8888 and terminates them.
+Command: lsof -ti :8888 | xargs kill -9
+Choose [y] execute, [n] cancel, [x] explain, [e] edit [y/n/x/e] (n): x
+
+# Hash explains each part, then asks again before running.
+Choose [y] execute, [n] cancel, [x] explain, [e] edit [y/n/x/e] (n): y
 # process running on 8888 is killed
 ```
 
@@ -53,11 +57,14 @@ pip install hashcli
 
 ### Setup
 
-Run the guided setup to configure your provider and install shell integration for the `#` prefix in supported shells (currently zsh and bash):
+Run the guided setup to configure your provider, choose a model, optionally store an API key or use an environment variable, enable streaming, validate the provider, and install shell integration for the `#` prefix in supported shells:
 
 ```bash
 hi --config
 ```
+
+Shell integration setup supports zsh, bash, fish, and PowerShell.
+If you run an interactive query before configuring Hash CLI and no provider API key is present in your environment, Hash CLI starts this setup flow automatically.
 
 ### Start Using Hash
 
@@ -95,7 +102,7 @@ The plugin system lets you add custom slash commands in minutes. Install communi
 ### Key Capabilities:
 * Natural Language Translation: From "find large files" to "undo my last git commit," it speaks your language.
 * Contextual Explanations: Understand why a command works before you run it.
-* Safety Interlocks: Every command is staged for your review—no "accidental deletes."
+* Safety Interlocks: Destructive commands and how-to execution suggestions are staged for review, with config controls for stricter confirmation.
 * No Tab-Hopping: Keep your hands on the home row and your focus on the code.
 * Full conversation history is preserved. Reference past sessions, review what worked, and build on previous interactions.
 
@@ -176,12 +183,18 @@ Create custom slash commands for your specific workflow:
 # Install a plugin
 hi --add-cmd plugins/model.py
 
+# Non-interactive install
+hi --add-cmd plugins/model.py --yes
+
+# See installed plugins
+hi --list-plugins
+
 # Use it
 hi /model
 hi /model list
 ```
 
-Build plugins in minutes. Check `plugins/` directory for examples.
+Install previews show the command name, class name, destination path, and first help line before copying. Plugins are validated in a subprocess before installation. Build plugins in minutes; check `plugins/` for examples.
 
 ### Smart Configuration
 
@@ -195,18 +208,28 @@ Hash CLI adapts to your environment:
 
 Override anything, anytime, from anywhere.
 
+Use command mode to inspect or edit config without opening the TOML file:
+
+```bash
+hi config get streaming
+hi config set streaming true
+hi config unset streaming
+```
+
 ### Conversation History
 
 Every interaction is saved:
 
 ```bash
-hi /history          # List all sessions
-hi /history show 42574d4e   # View session details
-hi /history clear    # Clear all saved conversations
+hi /history                 # List recent sessions
+hi /history show 42574d4e   # View session by full ID or unique prefix
+hi /history search rsync    # Search saved messages
+hi /history clear           # Clear all saved conversations
 ```
 
 Within an interactive shell, `hashcli` and `hi` now reuse one conversation per shell session.
 Use `--new-session` to start a fresh conversation for a single invocation.
+Use `--session ID_OR_PREFIX` to resume a specific previous session.
 If `HASHCLI_SESSION_ID` is set, that value is used instead of auto shell-session scoping.
 
 Review past solutions, replay successful commands, and learn from history.
@@ -219,7 +242,8 @@ Hash CLI is designed with security as a first-class feature:
 
 **Confirmation Behavior**
 - `how to ...` queries force confirmation for tool calls and suggested command execution
-- Other action-oriented queries follow `require_confirmation`
+- Other action-oriented queries follow `command_confirmation` for suggested command execution and `tool_confirmation` for tool calls
+- Suggested command confirmation offers execute, cancel, explain, and edit choices
 - Tool calls and command execution are shown before they run when confirmation is required
 
 **Command Filtering**
@@ -252,6 +276,10 @@ hi --provider anthropic "debug my code"
 
 # Show current config
 hi --show-config
+
+# Persist config changes
+hi config set llm_provider anthropic
+hi config set anthropic_model claude-sonnet-4-6
 ```
 
 ### Quiet Mode
@@ -278,7 +306,8 @@ export ANTHROPIC_API_KEY=your-key-here
 export HASHCLI_ANTHROPIC_API_KEY=your-key-here
 
 # Configure behavior
-export HASHCLI_REQUIRE_CONFIRMATION=true
+export HASHCLI_COMMAND_CONFIRMATION=true
+export HASHCLI_TOOL_CONFIRMATION=true
 export HASHCLI_SHOW_DEBUG=true
 export HASHCLI_STREAMING=true
 ```
@@ -292,7 +321,8 @@ llm_provider = "anthropic"
 anthropic_model = "claude-sonnet-4-6"
 anthropic_api_key = "your-key-here"
 streaming = true
-require_confirmation = true
+command_confirmation = true
+tool_confirmation = true
 show_debug = false
 blocked_commands = ["rm -rf /", "dd if=", "mkfs"]
 allowed_commands = []  # empty = allow all (except blocked)
@@ -332,9 +362,14 @@ hi --add-cmd my_plugin.py
 
 # Use it immediately
 hi /my-plugin arg1 arg2
+
+# List or remove installed plugins
+hi --list-plugins
+hi --remove-cmd my_plugin
 ```
 
 Plugins are stored in `~/.hashcli/plugins/` and loaded automatically on startup.
+Use `--yes` with `--add-cmd` or `--remove-cmd` for non-interactive scripts.
 
 ---
 
@@ -348,18 +383,26 @@ hi "your question here"
 hi --config          # Guided setup wizard + shell integration
 hi --config-file F   # Use a specific config file
 hi --show-config     # Display current settings
+hi config get KEY    # Show an effective config value
+hi config set KEY VALUE
+hi config unset KEY
 
 # Plugin management
-hi --add-cmd <file>  # Install plugin
+hi --add-cmd <file>  # Preview, validate, and install plugin
+hi --add-cmd <file> --yes
+hi --list-plugins
+hi --remove-cmd NAME
 
 # Built-in commands
 hi /help             # Show available commands
 hi /history          # Manage conversation history
+hi /history search QUERY
 
 # Flags
 --model MODEL             # Override model
 --provider PROVIDER       # Override provider (openai/anthropic/google)
 --new-session             # Start a fresh conversation for this run
+--session ID_OR_PREFIX    # Resume a previous conversation
 --debug, -d               # Enable debug output
 --quiet, -q               # Minimal output
 ```

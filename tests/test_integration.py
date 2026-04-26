@@ -78,7 +78,7 @@ class TestLLMIntegration:
         from hashcli.llm_handler import ToolCall
 
         sample_config.history_dir = temp_dir / "history"
-        sample_config.require_confirmation = False  # Skip confirmation for test
+        sample_config.tool_confirmation = False  # Skip confirmation for test
 
         # Mock LLM provider with tool call
         mock_provider = MagicMock()
@@ -125,7 +125,7 @@ class TestLLMIntegration:
         from hashcli.llm_handler import ToolCall
 
         sample_config.history_dir = temp_dir / "history"
-        sample_config.require_confirmation = False
+        sample_config.tool_confirmation = False
 
         mock_provider = MagicMock()
         mock_provider.generate_response = AsyncMock()
@@ -163,7 +163,7 @@ class TestLLMIntegration:
         from hashcli.llm_handler import ToolCall
 
         sample_config.history_dir = temp_dir / "history"
-        sample_config.require_confirmation = False  # Skip confirmation for test
+        sample_config.tool_confirmation = False  # Skip confirmation for test
 
         mock_provider = MagicMock()
         mock_provider.generate_response = AsyncMock()
@@ -256,7 +256,7 @@ class TestLLMIntegration:
         from hashcli.llm_handler import ToolCall
 
         sample_config.history_dir = temp_dir / "history"
-        sample_config.require_confirmation = False
+        sample_config.tool_confirmation = False
 
         mock_provider = MagicMock()
         mock_provider.generate_response = AsyncMock()
@@ -289,7 +289,7 @@ class TestLLMIntegration:
         from hashcli.llm_handler import ToolCall
 
         sample_config.history_dir = temp_dir / "history"
-        sample_config.require_confirmation = True
+        sample_config.tool_confirmation = True
 
         mock_provider = MagicMock()
         mock_provider.generate_response = AsyncMock()
@@ -326,7 +326,7 @@ class TestLLMIntegration:
         from hashcli.llm_handler import ToolCall
 
         sample_config.history_dir = temp_dir / "history"
-        sample_config.require_confirmation = False
+        sample_config.tool_confirmation = False
 
         mock_provider = MagicMock()
         mock_provider.generate_response = AsyncMock()
@@ -427,17 +427,19 @@ class TestCommandIntegration:
         plugin_dir.mkdir(parents=True)
         plugin_file = plugin_dir / "hello.py"
         plugin_file.write_text(
-            "\n".join([
-                "from typing import List",
-                "from hashcli.command_proxy import Command",
-                "",
-                "class HelloCommand(Command):",
-                "    def execute(self, args: List[str]) -> str:",
-                "        return 'hello plugin'",
-                "",
-                "    def get_help(self) -> str:",
-                "        return 'hello help'",
-            ])
+            "\n".join(
+                [
+                    "from typing import List",
+                    "from hashcli.command_proxy import Command",
+                    "",
+                    "class HelloCommand(Command):",
+                    "    def execute(self, args: List[str]) -> str:",
+                    "        return 'hello plugin'",
+                    "",
+                    "    def get_help(self) -> str:",
+                    "        return 'hello help'",
+                ]
+            )
             + "\n",
             encoding="utf-8",
         )
@@ -455,17 +457,19 @@ class TestCommandIntegration:
         plugin_dir.mkdir(parents=True)
         plugin_file = plugin_dir / "hello.py"
         plugin_file.write_text(
-            "\n".join([
-                "from typing import List",
-                "from hashcli.command_proxy import Command",
-                "",
-                "class HelloCommand(Command):",
-                "    def execute(self, args: List[str]) -> str:",
-                "        return 'hello plugin'",
-                "",
-                "    def get_help(self) -> str:",
-                "        return 'hello help'",
-            ])
+            "\n".join(
+                [
+                    "from typing import List",
+                    "from hashcli.command_proxy import Command",
+                    "",
+                    "class HelloCommand(Command):",
+                    "    def execute(self, args: List[str]) -> str:",
+                    "        return 'hello plugin'",
+                    "",
+                    "    def get_help(self) -> str:",
+                    "        return 'hello help'",
+                ]
+            )
             + "\n",
             encoding="utf-8",
         )
@@ -484,17 +488,19 @@ class TestCommandIntegration:
         plugin_dir.mkdir(parents=True)
         plugin_file = plugin_dir / "hello.py"
         plugin_file.write_text(
-            "\n".join([
-                "from typing import List",
-                "from hashcli.command_proxy import Command",
-                "",
-                "class HelloCommand(Command):",
-                "    def execute(self, args: List[str]) -> str:",
-                "        return 'hello plugin'",
-                "",
-                "    def get_help(self) -> str:",
-                "        return 'hello help'",
-            ])
+            "\n".join(
+                [
+                    "from typing import List",
+                    "from hashcli.command_proxy import Command",
+                    "",
+                    "class HelloCommand(Command):",
+                    "    def execute(self, args: List[str]) -> str:",
+                    "        return 'hello plugin'",
+                    "",
+                    "    def get_help(self) -> str:",
+                    "        return 'hello help'",
+                ]
+            )
             + "\n",
             encoding="utf-8",
         )

@@ -11,16 +11,19 @@ if __name__ == "__main__" and __package__ is None:
 
 
 import asyncio
+import copy
 import hashlib
+import json
 import os
 import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Optional
 from pathlib import Path
 from typing import List, Tuple
 
@@ -29,7 +32,7 @@ from rich import box
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
-from rich.prompt import Confirm
+from rich.prompt import Confirm, Prompt
 
 from hashcli.command_proxy import (
     CommandProxy,
@@ -42,7 +45,6 @@ from hashcli.config import (
     default_model,
     get_model_options,
     load_configuration,
-    save_config,
     update_config_values,
     validate_api_setup,
 )
@@ -63,7 +65,7 @@ app = typer.Typer(
 @dataclass(frozen=True)
 class QueryExecutionPolicy:
     force_tool_confirmation: Optional[bool]
-    suggested_command_confirmation: bool
+    command_confirmation: bool
     force_command_oriented: bool = False
 
 
@@ -113,25 +115,25 @@ def _is_embedded_hash_hint(raw_input: str) -> bool:
 def _build_query_execution_policy(
     raw_input: str,
     normalized_input: str,
-    require_confirmation: bool,
+    command_confirmation: bool,
 ) -> QueryExecutionPolicy:
     if _is_embedded_hash_hint(raw_input):
         return QueryExecutionPolicy(
             force_tool_confirmation=False,
-            suggested_command_confirmation=False,
+            command_confirmation=False,
             force_command_oriented=True,
         )
 
     if _is_how_to_query(normalized_input):
         return QueryExecutionPolicy(
             force_tool_confirmation=True,
-            suggested_command_confirmation=True,
+            command_confirmation=True,
             force_command_oriented=True,
         )
 
     return QueryExecutionPolicy(
         force_tool_confirmation=None,
-        suggested_command_confirmation=require_confirmation,
+        command_confirmation=command_confirmation,
         force_command_oriented=False,
     )
 
@@ -168,10 +170,34 @@ def _build_shell_scope_fingerprint() -> str:
     return "|".join(parts)
 
 
-def _resolve_conversation_session_id(new_session: bool = False) -> Optional[str]:
+def _resolve_conversation_session_id(
+    new_session: bool = False,
+    requested_session_id: Optional[str] = None,
+    config=None,
+) -> Optional[str]:
     """Resolve conversation session id for this invocation."""
+    if new_session and requested_session_id:
+        raise ConfigurationError("--session cannot be combined with --new-session.")
+
     if new_session:
         return str(uuid.uuid4())
+
+    if requested_session_id:
+        from hashcli.history import ConversationHistory
+
+        if config is not None and not config.history_enabled:
+            raise ConfigurationError("--session requires history to be enabled.")
+
+        history = ConversationHistory(config.history_dir if config is not None else None)
+        resolved = history.resolve_session_id(requested_session_id)
+        if resolved:
+            return resolved
+
+        matches = history.find_session_ids(requested_session_id)
+        if len(matches) > 1:
+            match_list = "\n".join(f"  {match}" for match in matches[:10])
+            raise ConfigurationError(f"Ambiguous session ID prefix {requested_session_id!r}. Matches:\n{match_list}")
+        raise ConfigurationError(f"No session found for {requested_session_id!r}.")
 
     existing_session_id = os.environ.get("HASHCLI_SESSION_ID", "").strip()
     if existing_session_id:
@@ -238,21 +264,146 @@ def _resolve_add_cmd_source(add_cmd_value: str) -> Path:
     raise ValueError(f"Invalid plugin source path: {source_path}")
 
 
-def _install_plugin_from_path(add_cmd_value: str) -> Tuple[str, Path, str]:
-    """Validate and install a third-party slash-command plugin."""
+def _validate_plugin_in_subprocess(source_file: Path) -> None:
+    """Validate plugin import in a child Python process before installation."""
+    project_root = Path(__file__).resolve().parent.parent
+    code = """
+import sys
+from pathlib import Path
+from hashcli.command_proxy import load_command_class_from_file
+
+plugin_path = Path(sys.argv[1])
+command_class = load_command_class_from_file(plugin_path)
+command = command_class()
+help_text = command.get_help()
+print(command_class.__name__)
+print(str(help_text).splitlines()[0] if str(help_text).splitlines() else "")
+"""
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        str(project_root) if not existing_pythonpath else f"{project_root}{os.pathsep}{existing_pythonpath}"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(source_file)],
+        text=True,
+        capture_output=True,
+        cwd=str(project_root),
+        env=env,
+    )
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or "").strip()
+        raise ValueError(f"Plugin validation failed before install: {details}")
+
+
+def _preview_plugin(add_cmd_value: str) -> Tuple[str, Path, str, str, Path]:
+    """Return command metadata for a plugin source without installing it."""
     source_file = _resolve_add_cmd_source(add_cmd_value)
+    _validate_plugin_in_subprocess(source_file)
+    command_class = load_command_class_from_file(source_file)
+    command = command_class()
+    command_name = source_file.stem.lower()
+    destination_file = get_user_plugin_directory() / source_file.name
+    help_text = command.get_help()
+    first_help_line = str(help_text).splitlines()[0] if str(help_text).splitlines() else ""
+    return command_name, source_file, command_class.__name__, first_help_line, destination_file
+
+
+def _install_plugin_from_path(add_cmd_value: str, yes: bool = False) -> Tuple[str, Path, str]:
+    """Validate and install a third-party slash-command plugin."""
+    command_name, source_file, class_name, first_help_line, destination_file = _preview_plugin(add_cmd_value)
 
     plugin_dir = get_user_plugin_directory()
     plugin_dir.mkdir(parents=True, exist_ok=True)
 
-    destination_file = plugin_dir / source_file.name
+    console.print("[bold]Plugin preview[/bold]")
+    console.print(f"Command: [cyan]/{command_name}[/cyan]")
+    console.print(f"Class: [cyan]{class_name}[/cyan]")
+    console.print(f"Install path: [dim]{destination_file}[/dim]")
+    if first_help_line:
+        console.print(f"Help: {first_help_line}")
+
+    if not yes:
+        if not _is_interactive_session():
+            raise ValueError("Refusing to install plugin non-interactively without --yes.")
+        if not _confirm_or_default("Install this plugin?", default=False):
+            raise ValueError("Plugin install cancelled.")
+
     shutil.copy2(source_file, destination_file)
 
     # Re-validate from installation path to ensure runtime loading works.
     installed_class = load_command_class_from_file(destination_file)
-    command_name = destination_file.stem.lower()
 
     return command_name, destination_file, installed_class.__name__
+
+
+def _list_installed_plugins() -> List[Dict[str, str]]:
+    plugin_dir = get_user_plugin_directory()
+    plugins = []
+    if not plugin_dir.exists():
+        return plugins
+    for plugin_file in sorted(plugin_dir.glob("*.py")):
+        if plugin_file.name.startswith("_"):
+            continue
+        command_name = plugin_file.stem.lower()
+        try:
+            command_class = load_command_class_from_file(plugin_file)
+            command = command_class()
+            help_lines = str(command.get_help()).splitlines()
+            first_help_line = help_lines[0] if help_lines else ""
+            class_name = command_class.__name__
+        except Exception as exc:
+            class_name = "<load failed>"
+            first_help_line = str(exc)
+        plugins.append(
+            {
+                "command": command_name,
+                "class": class_name,
+                "path": str(plugin_file),
+                "help": first_help_line,
+            }
+        )
+    return plugins
+
+
+def _print_installed_plugins() -> None:
+    plugins = _list_installed_plugins()
+    if not plugins:
+        console.print("No plugins installed.")
+        return
+    for plugin in plugins:
+        console.print(
+            f"/{plugin['command']}\t{plugin['class']}\t{plugin['path']}\t{plugin['help']}",
+            markup=False,
+        )
+
+
+def _remove_plugin_command(command_name: str, yes: bool = False) -> Path:
+    normalized = command_name.strip().lstrip("/").lower()
+    if not normalized:
+        raise ValueError("Plugin command name is required.")
+    plugin_file = get_user_plugin_directory() / f"{normalized}.py"
+    if not plugin_file.exists():
+        raise ValueError(f"No installed plugin found for /{normalized}.")
+    if not yes:
+        if not _is_interactive_session():
+            raise ValueError("Refusing to remove plugin non-interactively without --yes.")
+        if not _confirm_or_default(f"Remove /{normalized} plugin?", default=False):
+            raise ValueError("Plugin removal cancelled.")
+    plugin_file.unlink()
+    return plugin_file
+
+
+def _print_completion_commands() -> None:
+    try:
+        config = load_configuration()
+    except Exception:
+        config = None
+    proxy = CommandProxy(config or type("CompletionConfig", (), {"show_debug": False})())
+    for command_name in proxy.get_available_commands():
+        help_text = proxy.get_command_help(command_name) or ""
+        first_help_line = help_text.splitlines()[0] if help_text.splitlines() else ""
+        sys.stdout.write(f"{command_name}\t{first_help_line}\n")
 
 
 def _strip_execute_prompt_lines(response_text: str) -> str:
@@ -263,6 +414,30 @@ def _strip_execute_prompt_lines(response_text: str) -> str:
     lines = response_text.splitlines()
     filtered = [line for line in lines if not _is_execute_prompt_line(line)]
     return "\n".join(filtered).strip()
+
+
+def _extract_command_description(response_text: str, command: str) -> str:
+    """Extract a short description near a suggested command."""
+    if not response_text:
+        return ""
+
+    lines = [line.strip() for line in response_text.splitlines()]
+    command_indexes = [index for index, line in enumerate(lines) if command in line]
+    search_indexes = []
+    for index in command_indexes:
+        search_indexes.extend(range(max(0, index - 3), index + 1))
+    if not search_indexes:
+        search_indexes = list(range(min(3, len(lines))))
+
+    for index in search_indexes:
+        line = lines[index]
+        if not line or _is_execute_prompt_line(line) or line.startswith("```"):
+            continue
+        line = re.sub(r"^(?:[-*•]\s+|\d+[.)]\s+)", "", line).strip()
+        line = re.sub(r"`[^`]+`", "", line).strip(" :-")
+        if line and len(line.split()) >= 3:
+            return line[:160]
+    return ""
 
 
 def _is_execute_prompt_line(line: str) -> bool:
@@ -669,7 +844,7 @@ async def _maybe_execute_suggested_command(
     config,
     quiet: bool = False,
     user_query: Optional[str] = None,
-    require_confirmation: bool = True,
+    command_confirmation: bool = True,
 ) -> None:
     suggested_command = _extract_suggested_command(
         response_text,
@@ -681,11 +856,15 @@ async def _maybe_execute_suggested_command(
 
     from hashcli.tools.shell import ShellTool
 
-    must_confirm = require_confirmation or ShellTool.is_potentially_destructive_command(suggested_command)
+    must_confirm = command_confirmation or ShellTool.is_potentially_destructive_command(suggested_command)
 
     if must_confirm:
-        question = f"do you want execute `{suggested_command}`?"
-        if not Confirm.ask(question, default=False, console=console):
+        suggested_command = await _confirm_suggested_command(
+            suggested_command,
+            response_text,
+            config,
+        )
+        if not suggested_command:
             return
 
     tool = ShellTool()
@@ -699,6 +878,77 @@ async def _maybe_execute_suggested_command(
     )
     if result:
         display_result(result, config, quiet)
+
+
+async def _confirm_suggested_command(command: str, response_text: str, config) -> Optional[str]:
+    """Prompt for suggested command execution with explain/edit choices."""
+    if not _is_interactive_session():
+        console.print("[yellow]Suggested command requires confirmation; skipping in non-interactive mode.[/yellow]")
+        return None
+
+    current_command = command
+    while True:
+        description = _extract_command_description(response_text, current_command)
+        console.print("\n[bold yellow]Suggested command[/bold yellow]")
+        if description:
+            console.print(f"Description: {description}", markup=False)
+        console.print("Command: ", end="")
+        console.print(current_command, style="cyan", markup=False)
+        choice = Prompt.ask(
+            "Choose [y] execute, [n] cancel, [x] explain, [e] edit",
+            choices=["y", "n", "x", "e"],
+            default="n",
+            console=console,
+        )
+        if choice == "y":
+            return current_command
+        if choice == "n":
+            return None
+        if choice == "x":
+            explanation = await _explain_command_with_llm(current_command, config)
+            display_result(explanation, config)
+            continue
+        if choice == "e":
+            edited = _edit_command_in_editor(current_command)
+            if edited:
+                current_command = edited
+
+
+async def _explain_command_with_llm(command: str, config) -> str:
+    explanation_config = copy.deepcopy(config)
+    explanation_config.allow_command_execution = False
+    explanation_config.tool_confirmation = True
+    explanation_config.command_confirmation = True
+    explanation_config.streaming = False
+    handler = LLMHandler(explanation_config)
+    return await handler.chat(
+        "Explain what this shell command does, piece by piece, without executing it:\n" f"{command}",
+        force_tool_confirmation=True,
+    )
+
+
+def _edit_command_in_editor(command: str) -> Optional[str]:
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if not editor:
+        console.print("[yellow]Set VISUAL or EDITOR to edit suggested commands.[/yellow]")
+        return command
+
+    temp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", delete=False, prefix="hashcli-command-", suffix=".sh"
+        ) as temp_file:
+            temp_file.write(command + "\n")
+            temp_path = Path(temp_file.name)
+        subprocess.run(shlex.split(editor) + [str(temp_path)], check=False)
+        edited = temp_path.read_text(encoding="utf-8").strip()
+        return edited or command
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
 
 
 def show_welcome():
@@ -766,7 +1016,8 @@ def show_config_callback(value: bool):
             console.print(
                 f"Command execution: [cyan]{'Enabled' if config.allow_command_execution else 'Disabled'}[/cyan]"
             )
-            console.print(f"Confirmation required: [cyan]{'Yes' if config.require_confirmation else 'No'}[/cyan]")
+            console.print(f"Command confirmation: [cyan]{'Yes' if config.command_confirmation else 'No'}[/cyan]")
+            console.print(f"Tool confirmation: [cyan]{'Yes' if config.tool_confirmation else 'No'}[/cyan]")
             console.print(
                 f"Shell operators (|, ;): [cyan]{'Allowed' if config.allow_shell_operators else 'Blocked'}[/cyan]"
             )
@@ -781,90 +1032,203 @@ def show_config_callback(value: bool):
         raise typer.Exit()
 
 
-def config_callback(value: bool):
-    """Run interactive setup wizard and exit."""
-    if value:
-        console.print("\n[bold blue]Hash CLI Setup Wizard[/bold blue]")
-        console.print("This will help you configure Hash CLI for first use.\n")
+def _provider_key_field(provider: LLMProvider) -> str:
+    return {
+        LLMProvider.OPENAI: "openai_api_key",
+        LLMProvider.ANTHROPIC: "anthropic_api_key",
+        LLMProvider.GOOGLE: "google_api_key",
+    }[provider]
 
-        # Provider selection
-        console.print("[bold]1. Choose your LLM provider:[/bold]")
-        console.print("   1) OpenAI (OpenAI and compatible models hosted on Ollama, OpenRouter, etc.)")
-        console.print("   2) Anthropic (Claude)")
-        console.print("   3) Google (Gemini)")
 
-        provider_choice = typer.prompt("Enter choice (1-3)", type=int)
+def _provider_model_field(provider: LLMProvider) -> str:
+    return {
+        LLMProvider.OPENAI: "openai_model",
+        LLMProvider.ANTHROPIC: "anthropic_model",
+        LLMProvider.GOOGLE: "google_model",
+    }[provider]
 
-        if provider_choice == 1:
-            provider = LLMProvider.OPENAI
-            console.print("\n[bold]OpenAI & Compatible Models selected[/bold]")
-            # console.print("\n[bold]2. Get your OpenAI API key:[/bold]")
-            # console.print("   Visit: https://platform.openai.com/api-keys")
-        elif provider_choice == 2:
-            provider = LLMProvider.ANTHROPIC
-            console.print("\n[bold]Claude & Compatible Models selected[/bold]")
-            # console.print("\n[bold]2. Get your Anthropic API key:[/bold]")
-            # console.print("   Visit: https://console.anthropic.com/")
-        elif provider_choice == 3:
-            provider = LLMProvider.GOOGLE
-            console.print("\n[bold]Google Gemini Models selected[/bold]")
-            # console.print("\n[bold]2. Get your Google AI API key:[/bold]")
-            # console.print("   Visit: https://makersuite.google.com/app/apikey")
+
+def _provider_api_env_vars(provider: LLMProvider) -> List[str]:
+    if provider == LLMProvider.OPENAI:
+        return ["OPENAI_API_KEY", "HASHCLI_OPENAI_API_KEY"]
+    if provider == LLMProvider.ANTHROPIC:
+        return ["ANTHROPIC_API_KEY", "HASHCLI_ANTHROPIC_API_KEY"]
+    return ["GOOGLE_API_KEY", "GEMINI_API_KEY", "HASHCLI_GOOGLE_API_KEY"]
+
+
+def _get_existing_provider_key(provider: LLMProvider) -> Optional[str]:
+    for env_var in _provider_api_env_vars(provider):
+        value = os.environ.get(env_var, "").strip()
+        if value:
+            return value
+    return None
+
+
+def _confirm_or_default(question: str, default: bool = False) -> bool:
+    try:
+        return Confirm.ask(question, default=default, console=console)
+    except (EOFError, OSError):
+        return default
+
+
+def _has_provider_api_key_env() -> bool:
+    env_vars = [
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
+        "HASHCLI_OPENAI_API_KEY",
+        "HASHCLI_ANTHROPIC_API_KEY",
+        "HASHCLI_GOOGLE_API_KEY",
+    ]
+    return any(os.environ.get(env_var, "").strip() for env_var in env_vars)
+
+
+def _has_config_file(config_file: Optional[str] = None) -> bool:
+    if config_file:
+        return Path(config_file).expanduser().exists()
+    return any(path.exists() for path in (Path.home() / ".hashcli" / "config.toml", Path("/etc/hashcli/config.toml")))
+
+
+def _should_run_first_setup(config_file: Optional[str] = None) -> bool:
+    return _is_interactive_session() and not _has_config_file(config_file) and not _has_provider_api_key_env()
+
+
+async def _validate_setup_provider(config) -> Tuple[bool, str]:
+    """Run a minimal provider request to validate setup."""
+    try:
+        handler = LLMHandler(config)
+        response = await handler.provider.generate_response(
+            messages=[
+                {"role": "system", "content": "Reply with exactly: ok"},
+                {"role": "user", "content": "ok"},
+            ],
+            tools=None,
+        )
+    except Exception as exc:
+        return False, str(exc)
+
+    content = (response.content or "").strip()
+    lowered = content.lower()
+    error_markers = (
+        "authentication failed",
+        "invalid",
+        "api key",
+        "rate limit",
+        "quota",
+        "model",
+        "error",
+    )
+    if any(marker in lowered for marker in error_markers):
+        return False, content
+    return True, content or "ok"
+
+
+def run_setup_wizard(exit_after: bool = True) -> None:
+    """Run interactive setup wizard."""
+    console.print("\n[bold blue]Hash CLI Setup Wizard[/bold blue]")
+    console.print("This will help you configure Hash CLI for first use.\n")
+
+    console.print("[bold]1. Choose your LLM provider:[/bold]")
+    console.print("   1) OpenAI")
+    console.print("   2) Anthropic")
+    console.print("   3) Google Gemini")
+
+    provider_choice = typer.prompt("Enter choice (1-3)", type=int)
+    provider_by_choice = {
+        1: LLMProvider.OPENAI,
+        2: LLMProvider.ANTHROPIC,
+        3: LLMProvider.GOOGLE,
+    }
+    provider = provider_by_choice.get(provider_choice)
+    if provider is None:
+        console.print("[red]Invalid choice[/red]")
+        raise typer.Exit(1)
+    console.print(f"\n[bold]{provider.value.capitalize()} selected[/bold]")
+
+    console.print(f"\n[bold]2. Select {provider.value.capitalize()} model:[/bold]")
+    options = get_model_options(provider)
+    for i, model_name in enumerate(options, 1):
+        console.print(f"   {i}) {model_name}")
+    console.print(f"   {len(options) + 1}) Custom model name")
+
+    model_or_key = typer.prompt(f"Select model (1-{len(options) + 1})", default="1", show_default=True)
+    selected_model = default_model[provider]
+    api_key: Optional[str] = None
+    if model_or_key.isdigit():
+        model_choice = int(model_or_key)
+        if 1 <= model_choice <= len(options):
+            selected_model = options[model_choice - 1]
+        elif model_choice == len(options) + 1:
+            selected_model = typer.prompt("Enter custom model name")
         else:
             console.print("[red]Invalid choice[/red]")
             raise typer.Exit(1)
+    else:
+        # Backward-compatible path for scripted setup that supplies provider then key.
+        api_key = model_or_key
 
-        # # Select Model
-        # console.print(f"\n[bold]2. Select {provider.value.capitalize()} Model:[/bold]")
-        # options = get_model_options(provider)
-        # for i, model in enumerate(options, 1):
-        #     console.print(f"   {i}) {model}")
-        # console.print(f"   {len(options) + 1}) Custom model name")
+    if api_key is None:
+        api_key = typer.prompt(
+            "\nEnter your API key (leave blank to use an environment variable)",
+            default="",
+            show_default=False,
+            hide_input=True,
+        )
+    api_key = api_key.strip()
+    use_env_key = not api_key
+    effective_key = api_key or _get_existing_provider_key(provider)
 
-        # model_choice = typer.prompt(f"Select model (1-{len(options)+1})", type=int, default=1)
+    streaming = _confirm_or_default("Enable streaming responses?", default=False)
 
-        # if 1 <= model_choice <= len(options):
-        #     selected_model = options[model_choice - 1]
-        # elif model_choice == len(options) + 1:
-        #     selected_model = typer.prompt("Enter custom model name")
-        # else:
-        #     console.print("[red]Invalid choice[/red]")
-        #     raise typer.Exit(1)
-        selected_model = default_model[provider]
+    updates = {"llm_provider": provider.value, _provider_model_field(provider): selected_model, "streaming": streaming}
+    if api_key:
+        updates[_provider_key_field(provider)] = api_key
 
-        # API key input
-        api_key = typer.prompt("\nEnter your API key", hide_input=True)
+    if not update_config_values(updates):
+        console.print("[red]Failed to save configuration[/red]")
+        raise typer.Exit(1)
 
-        # Persist only the settings chosen in this wizard, preserving existing comments and unrelated keys.
-        updates = {"llm_provider": provider.value}
-        if provider == LLMProvider.OPENAI:
-            updates["openai_model"] = selected_model
-            updates["openai_api_key"] = api_key
-        elif provider == LLMProvider.ANTHROPIC:
-            updates["anthropic_model"] = selected_model
-            updates["anthropic_api_key"] = api_key
-        elif provider == LLMProvider.GOOGLE:
-            updates["google_model"] = selected_model
-            updates["google_api_key"] = api_key
-
-        if not update_config_values(updates):
-            console.print("[red]Failed to save configuration[/red]")
+    if effective_key:
+        validation_config = load_configuration()
+        setattr(validation_config, _provider_key_field(provider), effective_key)
+        validation_config.llm_provider = provider
+        setattr(validation_config, _provider_model_field(provider), selected_model)
+        validation_config.streaming = False
+        ok, message = asyncio.run(_validate_setup_provider(validation_config))
+        if not ok:
+            console.print(f"[red]Provider validation failed:[/red] {message}")
             raise typer.Exit(1)
+        console.print("[green]Provider validation succeeded.[/green]")
+    elif use_env_key:
+        env_vars = ", ".join(_provider_api_env_vars(provider))
+        console.print(f"[yellow]Skipped provider validation because no API key was found in {env_vars}.[/yellow]")
 
-        shell_setup_status = ensure_shell_integration()
+    shell_setup_status = ensure_shell_integration()
 
-        console.print("\n[bold green]Setup complete![/bold green]")
+    console.print("\n[bold green]Setup complete![/bold green]")
+    if api_key:
         console.print("API key has been saved to ~/.hashcli/config.toml")
-        if shell_setup_status == "installed":
-            console.print("Shell integration has been installed.")
-        elif shell_setup_status == "skipped":
-            console.print("Shell integration is already configured. Skipped.")
-        elif shell_setup_status == "unsupported":
-            console.print("Shell integration was skipped because the current shell is not supported.")
-        elif shell_setup_status == "failed":
-            console.print("Shell integration could not be installed automatically.")
-        console.print("Try: [code]hashcli hello world[/code]")
+    else:
+        console.print("API key will be read from your environment.")
+    if shell_setup_status == "installed":
+        console.print("Shell integration has been installed.")
+    elif shell_setup_status == "skipped":
+        console.print("Shell integration is already configured. Skipped.")
+    elif shell_setup_status == "unsupported":
+        console.print("Shell integration was skipped because the current shell is not supported.")
+    elif shell_setup_status == "failed":
+        console.print("Shell integration could not be installed automatically.")
+    console.print("Try: [code]hashcli hello world[/code]")
+
+    if exit_after:
         raise typer.Exit()
+
+
+def config_callback(value: bool):
+    """Run interactive setup wizard and exit."""
+    if value:
+        run_setup_wizard(exit_after=True)
 
 
 def _get_shell_integration_metadata(shell_name: str) -> Optional[dict]:
@@ -888,6 +1252,24 @@ def _get_shell_integration_metadata(shell_name: str) -> Optional[dict]:
                 home_dir / ".config" / "bash" / "hash" / "hash_completion.bash",
             ],
         }
+    if shell_name == "fish":
+        return {
+            "rc_file": None,
+            "source_line": None,
+            "required_files": [
+                home_dir / ".config" / "fish" / "conf.d" / "hash_integration.fish",
+                home_dir / ".config" / "fish" / "completions" / "completions.fish",
+            ],
+        }
+    if shell_name in ("pwsh", "powershell", "powershell.exe", "pwsh.exe"):
+        return {
+            "rc_file": None,
+            "source_line": None,
+            "required_files": [
+                home_dir / ".hashcli" / "powershell" / "hash.ps1",
+                home_dir / ".hashcli" / "powershell" / "completions.ps1",
+            ],
+        }
     return None
 
 
@@ -900,12 +1282,16 @@ def is_shell_integration_installed(shell_name: str) -> bool:
     if not all(path.exists() for path in metadata["required_files"]):
         return False
 
-    rc_file = metadata["rc_file"]
+    rc_file = metadata.get("rc_file")
+    source_line = metadata.get("source_line")
+    if rc_file is None or source_line is None:
+        return True
+
     if not rc_file.exists():
         return False
 
     rc_contents = rc_file.read_text(encoding="utf-8", errors="ignore")
-    return metadata["source_line"] in rc_contents
+    return source_line in rc_contents
 
 
 def ensure_shell_integration() -> str:
@@ -913,9 +1299,9 @@ def ensure_shell_integration() -> str:
     shell_env = os.environ.get("SHELL", "")
     shell_name = Path(shell_env).name
 
-    # Support zsh and bash
-    if shell_name not in ("zsh", "bash"):
-        console.print("[yellow]Shell integration setup currently supports zsh and bash only.[/yellow]")
+    supported_shells = ("zsh", "bash", "fish", "pwsh", "powershell", "powershell.exe", "pwsh.exe")
+    if shell_name not in supported_shells:
+        console.print("[yellow]Shell integration setup supports zsh, bash, fish, and PowerShell.[/yellow]")
         console.print(f"Detected shell: [dim]{shell_name or 'unknown'}[/dim]")
         console.print("For other shells, use the scripts in the shell directory.")
         return "unsupported"
@@ -926,7 +1312,12 @@ def ensure_shell_integration() -> str:
 
     # Copy shell scripts to ~/.hashcli/shell/ if not already there
     user_shell_dir = Path.home() / ".hashcli" / "shell"
-    install_script = user_shell_dir / shell_name / "install.sh"
+    install_shell_name = (
+        "powershell" if shell_name in ("pwsh", "powershell", "powershell.exe", "pwsh.exe") else shell_name
+    )
+    install_script = (
+        user_shell_dir / install_shell_name / ("install.ps1" if install_shell_name == "powershell" else "install.sh")
+    )
 
     console.print("[dim]Setting up shell integration scripts...[/dim]")
     try:
@@ -948,6 +1339,8 @@ def ensure_shell_integration() -> str:
             # Make bash scripts executable
             for script in user_shell_dir.rglob("*.bash"):
                 script.chmod(0o755)
+            for script in user_shell_dir.rglob("*.ps1"):
+                script.chmod(0o755)
             console.print(f"[dim]Shell scripts copied to {user_shell_dir}[/dim]")
         else:
             console.print("[bold red]Unable to locate shell scripts in package.[/bold red]")
@@ -959,10 +1352,20 @@ def ensure_shell_integration() -> str:
     # Run install script from user directory
     console.print(f"[bold blue]Installing {shell_name} shell integration...[/bold blue]")
     try:
-        subprocess.run(
-            ["/bin/bash", str(install_script), "install"],
-            check=True,
-        )
+        if install_shell_name == "powershell":
+            powershell_binary = shutil.which("pwsh") or shutil.which("powershell")
+            if powershell_binary is None:
+                console.print("[bold red]PowerShell executable not found.[/bold red]")
+                return "failed"
+            subprocess.run(
+                [powershell_binary, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(install_script)],
+                check=True,
+            )
+        else:
+            subprocess.run(
+                ["/bin/bash", str(install_script), "install"],
+                check=True,
+            )
     except subprocess.CalledProcessError as exc:
         console.print("[bold red]Shell integration setup failed.[/bold red]")
         return "failed"
@@ -999,6 +1402,11 @@ def main(
         "-n",
         help="Start a new conversation session for this invocation.",
     ),
+    session: Optional[str] = typer.Option(
+        None,
+        "--session",
+        help="Resume a conversation session by full ID or unique prefix.",
+    ),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Minimize output, show only results"),
     version: Optional[bool] = typer.Option(
         None,
@@ -1030,11 +1438,50 @@ def main(
         "-a",
         help="Install a slash-command plugin from a .py file or folder.",
     ),
+    list_plugins: bool = typer.Option(
+        False,
+        "--list-plugins",
+        help="List installed slash-command plugins.",
+    ),
+    remove_cmd: Optional[str] = typer.Option(
+        None,
+        "--remove-cmd",
+        help="Remove an installed slash-command plugin by command name.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Confirm non-interactive plugin install/removal prompts.",
+    ),
+    completion_commands: bool = typer.Option(
+        False,
+        "--completion-commands",
+        help="Print slash command names for shell completions.",
+        hidden=True,
+    ),
 ):
     """Main function for the Hash CLI."""
+    if completion_commands:
+        _print_completion_commands()
+        raise typer.Exit(0)
+
+    if list_plugins:
+        _print_installed_plugins()
+        raise typer.Exit(0)
+
+    if remove_cmd:
+        try:
+            removed_path = _remove_plugin_command(remove_cmd, yes=yes)
+            console.print(f"[green]Removed plugin:[/green] {removed_path}")
+            raise typer.Exit(0)
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+
     if add_cmd:
         try:
-            command_name, destination_file, class_name = _install_plugin_from_path(add_cmd)
+            command_name, destination_file, class_name = _install_plugin_from_path(add_cmd, yes=yes)
             console.print(f"[green]Installed plugin:[/green] {destination_file}")
             console.print(f"[green]Validated command class:[/green] {class_name}")
             console.print(f"[green]Available slash command:[/green] /{command_name}")
@@ -1059,6 +1506,16 @@ def main(
         raise typer.Exit()
 
     try:
+        if new_session and session:
+            raise ConfigurationError("--session cannot be combined with --new-session.")
+
+        if input_text.startswith("config "):
+            input_text = "/" + input_text
+
+        if not input_text.startswith("/") and _should_run_first_setup(config_file):
+            console.print("[yellow]No Hash CLI configuration or provider API key was found.[/yellow]")
+            run_setup_wizard(exit_after=False)
+
         config = load_configuration(
             config_file=config_file,
             debug=debug,
@@ -1069,16 +1526,19 @@ def main(
         if provider:
             config.llm_provider = _resolve_provider_option(provider)
 
-        query_policy = _build_query_execution_policy(raw_input, input_text, config.require_confirmation)
-
-        # Validate API key setup
-        validate_api_setup(config)
+        query_policy = _build_query_execution_policy(raw_input, input_text, config.command_confirmation)
 
         # Decide execution mode
         if input_text.startswith("/"):
             execute_command_mode(input_text, config, quiet)
         else:
-            session_id = _resolve_conversation_session_id(new_session=new_session)
+            # Validate API key setup
+            validate_api_setup(config)
+            session_id = _resolve_conversation_session_id(
+                new_session=new_session,
+                requested_session_id=session,
+                config=config,
+            )
             asyncio.run(
                 execute_llm_mode(
                     input_text,
@@ -1086,7 +1546,7 @@ def main(
                     quiet,
                     session_id=session_id,
                     force_tool_confirmation=query_policy.force_tool_confirmation,
-                    suggested_command_confirmation=query_policy.suggested_command_confirmation,
+                    command_confirmation=query_policy.command_confirmation,
                     force_command_oriented=query_policy.force_command_oriented,
                 )
             )
@@ -1120,7 +1580,7 @@ async def execute_llm_mode(
     quiet: bool = False,
     session_id: Optional[str] = None,
     force_tool_confirmation: Optional[bool] = None,
-    suggested_command_confirmation: bool = True,
+    command_confirmation: bool = True,
     force_command_oriented: bool = False,
 ):
     """Execute query in LLM chat mode."""
@@ -1169,7 +1629,7 @@ async def execute_llm_mode(
                 config,
                 quiet,
                 user_query=input_text,
-                require_confirmation=suggested_command_confirmation,
+                command_confirmation=command_confirmation,
             )
         return
 
@@ -1194,7 +1654,7 @@ async def execute_llm_mode(
                 config,
                 quiet,
                 user_query=input_text,
-                require_confirmation=suggested_command_confirmation,
+                command_confirmation=command_confirmation,
             )
 
 

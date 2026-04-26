@@ -184,28 +184,30 @@ class LLMHandler:
         ]
 
         if self.config.allow_command_execution and self._should_expose_shell_tool(user_message):
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": "execute_shell_command",
-                    "description": "Execute a shell command and return its output. Use with caution.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "command": {
-                                "type": "string",
-                                "description": "The shell command to execute",
+            tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "execute_shell_command",
+                        "description": "Execute a shell command and return its output. Use with caution.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "command": {
+                                    "type": "string",
+                                    "description": "The shell command to execute",
+                                },
+                                "description": {
+                                    "type": "string",
+                                    "description": "Brief description of what this command does",
+                                },
                             },
-                            "description": {
-                                "type": "string",
-                                "description": "Brief description of what this command does",
-                            },
+                            "required": ["command", "description"],
+                            "additionalProperties": False,
                         },
-                        "required": ["command", "description"],
-                        "additionalProperties": False,
                     },
-                },
-            })
+                }
+            )
 
         return tools
 
@@ -248,41 +250,49 @@ class LLMHandler:
             for tool_call in current_response.tool_calls:
                 executor = get_tool_executor(tool_call.name)
                 if executor is None:
-                    tool_results.append({
-                        "tool_call_id": tool_call.call_id,
-                        "tool_name": tool_call.name,
-                        "output": f"Unknown tool: {tool_call.name}",
-                    })
+                    tool_results.append(
+                        {
+                            "tool_call_id": tool_call.call_id,
+                            "tool_name": tool_call.name,
+                            "output": f"Unknown tool: {tool_call.name}",
+                        }
+                    )
                     continue
 
                 # Get user confirmation if required
-                effective_confirmation = self.config.require_confirmation
+                effective_confirmation = self.config.tool_confirmation
                 if force_tool_confirmation is not None:
                     effective_confirmation = force_tool_confirmation
 
                 if self._should_confirm_tool_call(executor, tool_call, effective_confirmation):
                     if not self._get_user_confirmation(tool_call):
-                        tool_results.append({
-                            "tool_call_id": tool_call.call_id,
-                            "tool_name": tool_call.name,
-                            "output": "User declined to execute this tool call.",
-                        })
+                        tool_results.append(
+                            {
+                                "tool_call_id": tool_call.call_id,
+                                "tool_name": tool_call.name,
+                                "output": "User declined to execute this tool call.",
+                            }
+                        )
                         continue
 
                 # Execute tool call
                 try:
                     result = await executor.execute(tool_call.arguments, self.config)
-                    tool_results.append({
-                        "tool_call_id": tool_call.call_id,
-                        "tool_name": tool_call.name,
-                        "output": str(result),
-                    })
+                    tool_results.append(
+                        {
+                            "tool_call_id": tool_call.call_id,
+                            "tool_name": tool_call.name,
+                            "output": str(result),
+                        }
+                    )
                 except Exception as e:
-                    tool_results.append({
-                        "tool_call_id": tool_call.call_id,
-                        "tool_name": tool_call.name,
-                        "output": f"Error executing tool: {e}",
-                    })
+                    tool_results.append(
+                        {
+                            "tool_call_id": tool_call.call_id,
+                            "tool_name": tool_call.name,
+                            "output": f"Error executing tool: {e}",
+                        }
+                    )
 
             # Get follow-up response from LLM with tool results
             # Note: Some providers (like Anthropic) don't allow empty content in assistant messages

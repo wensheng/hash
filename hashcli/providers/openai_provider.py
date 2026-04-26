@@ -28,6 +28,7 @@ class OpenAIProvider(LLMProvider):
         """Generate response using OpenAI API."""
 
         try:
+
             def get_field(obj: Any, name: str, default: Any = None) -> Any:
                 if isinstance(obj, dict):
                     return obj.get(name, default)
@@ -75,13 +76,15 @@ class OpenAIProvider(LLMProvider):
                 for tool in tools:
                     if tool.get("type") == "function" and "function" in tool:
                         function_spec = tool["function"]
-                        response_tools.append({
-                            "type": "function",
-                            "name": function_spec.get("name"),
-                            "description": function_spec.get("description"),
-                            "parameters": function_spec.get("parameters"),
-                            "strict": True,
-                        })
+                        response_tools.append(
+                            {
+                                "type": "function",
+                                "name": function_spec.get("name"),
+                                "description": function_spec.get("description"),
+                                "parameters": function_spec.get("parameters"),
+                                "strict": True,
+                            }
+                        )
                     else:
                         response_tools.append(tool)
 
@@ -237,16 +240,19 @@ class OpenAIProvider(LLMProvider):
 
         except openai.RateLimitError:
             return LLMResponse(
-                content="Rate limit exceeded. Please try again in a moment.",
+                content="OpenAI rate limit exceeded. Please try again in a moment or choose a different model.",
                 model=self.model,
             )
         except openai.AuthenticationError:
             return LLMResponse(
-                content="Authentication failed. Please check your OpenAI API key.",
+                content='Authentication failed. Please check your OpenAI API key. Run "hi --config" to set this up interactively.',
                 model=self.model,
             )
         except openai.APIError as e:
-            return LLMResponse(content=f"OpenAI API error: {str(e)}", model=self.model)
+            error_text = str(e)
+            if "model" in error_text.lower() or "404" in error_text:
+                error_text = f'{error_text} Check the configured OpenAI model or run "hi --config".'
+            return LLMResponse(content=f"OpenAI API error: {error_text}", model=self.model)
         except Exception as e:
             return LLMResponse(content=f"Unexpected error: {str(e)}", model=self.model)
 
@@ -294,22 +300,26 @@ class OpenAIProvider(LLMProvider):
                 name = func.get("name")
                 arguments = func.get("arguments")
                 if call_id and name and arguments is not None:
-                    input_items.append({
-                        "type": "function_call",
-                        "call_id": call_id,
-                        "name": name,
-                        "arguments": arguments,
-                    })
+                    input_items.append(
+                        {
+                            "type": "function_call",
+                            "call_id": call_id,
+                            "name": name,
+                            "arguments": arguments,
+                        }
+                    )
 
             # Map tool outputs to function_call_output items.
             if role == "tool":
                 call_id = message.get("tool_call_id") or message.get("call_id")
                 if call_id:
-                    input_items.append({
-                        "type": "function_call_output",
-                        "call_id": call_id,
-                        "output": content or "",
-                    })
+                    input_items.append(
+                        {
+                            "type": "function_call_output",
+                            "call_id": call_id,
+                            "output": content or "",
+                        }
+                    )
                 elif content:
                     # Fallback to preserve tool output if call_id is missing.
                     input_items.append(make_message_item("user", f"Tool result: {content}"))

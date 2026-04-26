@@ -100,7 +100,7 @@ class ModelCommand(Command):
         if not config.get_current_api_key():
             return (
                 f"Model set to {model_name} ({target_provider.value}), but no API key"
-                f" configured.\\nSet HASHCMD_{target_provider.value.upper()}_API_KEY"
+                f" configured.\\nSet HASHCLI_{target_provider.value.upper()}_API_KEY"
                 " environment variable."
             )
 
@@ -122,7 +122,7 @@ class ModelCommand(Command):
         if not config.get_current_api_key():
             return (
                 f"Switched to {target_provider.value}, but no API key configured.\\nSet"
-                f" HASHCMD_{target_provider.value.upper()}_API_KEY environment"
+                f" HASHCLI_{target_provider.value.upper()}_API_KEY environment"
                 " variable."
             )
 

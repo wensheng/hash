@@ -34,53 +34,9 @@ function Complete-HashProxyCommand {
     $proxyCmd = ($Command -replace '^\s*/([^\s]+).*', '$1').Trim()
 
     switch ($proxyCmd) {
-        'clean' {
-            # No additional completions for clean
-        }
-
-        'model' {
-            # Available LLM models
-            $models = @(
-                @{Name='gpt-4'; Description='OpenAI GPT-4'},
-                @{Name='gpt-3.5-turbo'; Description='OpenAI GPT-3.5 Turbo'},
-                @{Name='claude-3-sonnet'; Description='Anthropic Claude 3 Sonnet'},
-                @{Name='claude-3-haiku'; Description='Anthropic Claude 3 Haiku'}
-            )
-
-            $models | Where-Object { $_.Name -like "*$WordToComplete*" } | ForEach-Object {
-                [System.Management.Automation.CompletionResult]::new(
-                    $_.Name,
-                    $_.Name,
-                    [System.Management.Automation.CompletionResultType]::ParameterValue,
-                    $_.Description
-                )
-            }
-        }
-
-        'fix' {
-            # Code-related fix options
-            $fixOptions = @(
-                @{Name='bug'; Description='Fix a bug in the code'},
-                @{Name='error'; Description='Resolve an error message'},
-                @{Name='performance'; Description='Optimize performance'},
-                @{Name='security'; Description='Address security issues'},
-                @{Name='syntax'; Description='Fix syntax errors'},
-                @{Name='logic'; Description='Fix logical errors'}
-            )
-
-            $fixOptions | Where-Object { $_.Name -like "*$WordToComplete*" } | ForEach-Object {
-                [System.Management.Automation.CompletionResult]::new(
-                    $_.Name,
-                    $_.Name,
-                    [System.Management.Automation.CompletionResultType]::ParameterValue,
-                    $_.Description
-                )
-            }
-        }
-
         'config' {
             # Configuration options
-            $configOptions = @('show', 'set', 'reset', 'list')
+            $configOptions = @('get', 'set', 'unset')
             $configOptions | Where-Object { $_ -like "*$WordToComplete*" } | ForEach-Object {
                 [System.Management.Automation.CompletionResult]::new(
                     $_,
@@ -91,18 +47,54 @@ function Complete-HashProxyCommand {
             }
         }
 
-        default {
-            # Generic command completions
-            Get-Command -Name "*$WordToComplete*" -CommandType Application,Function,Cmdlet |
-                Select-Object -First 20 | ForEach-Object {
+        'history' {
+            $historyOptions = @('list', 'show', 'search', 'clear')
+            $historyOptions | Where-Object { $_ -like "*$WordToComplete*" } | ForEach-Object {
                 [System.Management.Automation.CompletionResult]::new(
-                    $_.Name,
-                    $_.Name,
-                    [System.Management.Automation.CompletionResultType]::Command,
-                    "Command: $($_.Name)"
+                    $_,
+                    $_,
+                    [System.Management.Automation.CompletionResultType]::ParameterValue,
+                    "History option: $_"
                 )
             }
         }
+
+        default {
+            $commands = Get-HashSlashCommands
+            $commands | Where-Object { $_.Name -like "*$WordToComplete*" } | ForEach-Object {
+                [System.Management.Automation.CompletionResult]::new(
+                    $_.Name,
+                    $_.Name,
+                    [System.Management.Automation.CompletionResultType]::ParameterValue,
+                    $_.Description
+                )
+            }
+        }
+    }
+}
+
+function Get-HashSlashCommands {
+    $fallback = @(
+        @{Name='help'; Description='Show available commands'},
+        @{Name='history'; Description='Manage conversation history'},
+        @{Name='config'; Description='Manage configuration'}
+    )
+
+    try {
+        $rows = hashcli --completion-commands 2>$null
+        if (-not $rows) {
+            return $fallback
+        }
+        return $rows | ForEach-Object {
+            $parts = $_ -split "`t", 2
+            $description = ''
+            if ($parts.Length -gt 1) {
+                $description = $parts[1]
+            }
+            @{Name=$parts[0]; Description=$description}
+        }
+    } catch {
+        return $fallback
     }
 }
 

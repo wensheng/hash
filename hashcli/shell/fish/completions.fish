@@ -1,6 +1,20 @@
 # Hash completions for fish shell
 
 # Function to detect mode and provide appropriate completions
+function __hash_complete_slash_commands
+    set -l commands (hashcli --completion-commands 2>/dev/null)
+    if test (count $commands) -eq 0
+        echo -e "help\tShow available commands"
+        echo -e "history\tManage conversation history"
+        echo -e "config\tManage configuration"
+        return
+    end
+    for entry in $commands
+        set -l parts (string split \t -- $entry)
+        echo -e "$parts[1]\t$parts[2]"
+    end
+end
+
 function __hash_complete_command
     set -l buffer_content (commandline -cp)
 
@@ -13,23 +27,17 @@ function __hash_complete_command
         set -l proxy_cmd (string replace -r '^/([^[:space:]]+).*' '$1' "$buffer_content")
 
         switch "$proxy_cmd"
-            case clean
-                # No additional completions for clean
-            case model
-                # Available models
-                echo -e "gpt-4\tOpenAI GPT-4"
-                echo -e "gpt-3.5-turbo\tOpenAI GPT-3.5 Turbo"
-                echo -e "claude-3-sonnet\tAnthropic Claude 3 Sonnet"
-                echo -e "claude-3-haiku\tAnthropic Claude 3 Haiku"
-            case fix
-                # Code-related options
-                echo -e "bug\tFix a bug"
-                echo -e "error\tResolve an error"
-                echo -e "performance\tOptimize performance"
-                echo -e "security\tAddress security issues"
+            case history
+                echo -e "list\tList recent conversations"
+                echo -e "show\tShow a conversation by ID"
+                echo -e "search\tSearch conversation history"
+                echo -e "clear\tClear all history"
+            case config
+                echo -e "get\tShow a config value"
+                echo -e "set\tSet a config value"
+                echo -e "unset\tRemove a config value"
             case '*'
-                # Generic command completions
-                __fish_complete_command
+                __hash_complete_slash_commands
         end
     else
         # LLM mode - common query patterns

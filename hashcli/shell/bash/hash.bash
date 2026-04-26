@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hash CLI Integration for bash
-# This script enables interception for any command line containing #
+# This script enables interception for command lines starting with a single #
 
 if [[ -z "$HASHCLI_SESSION_ID" ]]; then
     export HASHCLI_SESSION_ID=$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || echo "$$-$(date +%s)")
@@ -9,12 +9,13 @@ fi
 # Function to handle hash magic execution
 hash_magic_execute() {
     local line="$READLINE_LINE"
+    local trimmed_line="${line#"${line%%[![:space:]]*}"}"
 
-    # Ignore lines containing '##' and let shell handle comments normally.
-    if [[ "$line" == *"##"* ]]; then
+    # Keep ## as a plain shell comment escape.
+    if [[ "$trimmed_line" == "##"* ]]; then
         return
-    # Intercept command line containing '#'
-    elif [[ "$line" == *"#"* ]]; then
+    # Intercept command lines starting with a single '#'.
+    elif [[ "$trimmed_line" == "#"* ]]; then
         # Save the original line for history
         local original_line="$line"
 
@@ -24,7 +25,7 @@ hash_magic_execute() {
 
         # Execute hashcli with the full original command line
         echo  # New line for output
-        hcli "$original_line" < /dev/tty
+        hashcli "$original_line" < /dev/tty
         local exit_code=$?
         echo  # Another new line
 
@@ -47,8 +48,8 @@ bind -x '"\C-j": hash_magic_execute'  # Also bind Ctrl+J (alternative newline)
 
 # Function to check if hashcli is available
 hash_check_availability() {
-    if ! command -v hcli >/dev/null 2>&1; then
-        echo "Warning: hcli command not found. Please ensure Hash CLI is installed and in your PATH."
+    if ! command -v hashcli >/dev/null 2>&1; then
+        echo "Warning: hashcli command not found. Please ensure Hash CLI is installed and in your PATH."
         return 1
     fi
     return 0

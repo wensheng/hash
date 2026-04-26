@@ -33,6 +33,24 @@ _hash() {
 }
 
 # Command proxy mode completions
+_hash_get_commands() {
+    local -a commands
+    commands=("${(@f)$({ hashcli --completion-commands } 2>/dev/null)}")
+    if (( ${#commands[@]} == 0 )); then
+        commands=('help:Show available commands' 'history:Manage conversation history' 'config:Manage configuration')
+    else
+        local -a formatted
+        local entry name desc
+        for entry in "${commands[@]}"; do
+            name="${entry%%	*}"
+            desc="${entry#*	}"
+            formatted+=("${name}:${desc}")
+        done
+        commands=("${formatted[@]}")
+    fi
+    print -l "${commands[@]}"
+}
+
 _hash_command_proxy_mode() {
     local proxy_content="$1"
     local proxy_cmd proxy_args
@@ -50,11 +68,7 @@ _hash_command_proxy_mode() {
         help)
             # Help topics
             local -a help_topics
-            help_topics=(
-                'help:Show available commands'
-                'history:Manage conversation history'
-                'commands:Available commands'
-            )
+            help_topics=("${(@f)$(_hash_get_commands)}" 'commands:Available commands')
             _describe 'help topics' help_topics
             ;;
         history)
@@ -62,26 +76,28 @@ _hash_command_proxy_mode() {
             history_options=(
                 'list:List recent conversations'
                 'show:Show a conversation by ID'
+                'search:Search conversation history'
                 'clear:Clear all history'
             )
             _describe 'history options' history_options
             ;;
+        config)
+            local -a config_options
+            config_options=(
+                'get:Show a config value'
+                'set:Set a config value'
+                'unset:Remove a config value'
+            )
+            _describe 'config options' config_options
+            ;;
         *)
             # Unknown slash command: suggest built-in slash commands
+            local -a slash_commands
+            slash_commands=("${(@f)$(_hash_get_commands)}")
             if [[ -z "$proxy_cmd" ]]; then
                 # List available slash commands
-                local -a slash_commands
-                slash_commands=(
-                    'help:Show available commands'
-                    'history:Manage conversation history'
-                )
                 _describe 'available commands' slash_commands -p '/'
             else
-                local -a slash_commands
-                slash_commands=(
-                    'help:Show available commands'
-                    'history:Manage conversation history'
-                )
                 _describe 'available commands' slash_commands -p '/'
             fi
             ;;

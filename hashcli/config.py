@@ -3,9 +3,10 @@
 import os
 import platform
 import re
+import sys
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union, get_args, get_origin
 
 if platform.python_version_tuple() < ("3", "11"):
     import tomli
@@ -14,6 +15,12 @@ else:
 
 import tomli_w
 from pydantic import BaseModel, Field, validator
+
+
+class ConfigurationError(Exception):
+    """Configuration-related errors."""
+
+    pass
 
 
 class LogLevel(str, Enum):
@@ -56,7 +63,8 @@ class HashConfig(BaseModel):
 
     # Tool Configuration
     allow_command_execution: bool = Field(default=True, description="Allow LLM to execute shell commands")
-    require_confirmation: bool = Field(default=False, description="Require user confirmation for tool calls")
+    command_confirmation: bool = Field(default=False, description="Require user confirmation for suggested commands")
+    tool_confirmation: bool = Field(default=False, description="Require user confirmation for tool calls")
     command_timeout: int = Field(default=30, description="Command execution timeout in seconds")
     allow_shell_operators: bool = Field(
         default=True,
@@ -84,7 +92,7 @@ class HashConfig(BaseModel):
     )
 
     class Config:
-        env_prefix = "HASHCMD_"
+        env_prefix = "HASHCLI_"
         case_sensitive = False
 
     @validator("history_dir", pre=True, always=True)
@@ -165,9 +173,8 @@ def load_config_file(config_path: Path) -> Dict[str, Any]:
         if config_path.exists():
             with open(config_path, "rb") as f:
                 return tomllib.load(f)
-    except Exception:
-        # Silent failure for config files - we'll use defaults
-        pass
+    except Exception as exc:
+        raise ConfigurationError(f"Invalid configuration file {config_path}: {exc}") from exc
     return {}
 
 
@@ -192,6 +199,11 @@ def load_environment_variables() -> Dict[str, Any]:
                 except ValueError:
                     config[config_key] = value
 
+    legacy_confirmation = config.pop("require_confirmation", None)
+    if legacy_confirmation is not None:
+        config.setdefault("command_confirmation", legacy_confirmation)
+        config.setdefault("tool_confirmation", legacy_confirmation)
+
     return config
 
 
@@ -204,17 +216,13 @@ def load_configuration(
 
     Priority order (highest to lowest):
     1. Function parameters (config_file, debug, model_override)
-    2. Environment variables (HASHCMD_*)
+    2. Environment variables (HASHCLI_*)
     3. User config file (~/.hashcli/config.toml)
     4. System config file (/etc/hashcli/config.toml)
     5. Default values
     """
-    # Get the primary config path
-    primary_config_path = Path.home() / ".hashcli" / "config.toml"
-
     # Start with empty config
     merged_config = {}
-    config_loaded_from_file = False
 
     # Load from config files (lowest priority)
     config_paths = get_config_paths()
@@ -223,14 +231,24 @@ def load_configuration(
         config_paths.insert(0, Path(config_file))
 
     for path in reversed(config_paths):  # Reverse to maintain priority
-        file_config = load_config_file(path)
+        try:
+            file_config = load_config_file(path)
+        except ConfigurationError as exc:
+            print(f"Warning: {exc}", file=sys.stderr)
+            raise
         if file_config:
             merged_config.update(file_config)
-            config_loaded_from_file = True
 
     # Load from environment variables (higher priority)
     env_config = load_environment_variables()
     merged_config.update(env_config)
+
+    # Backward compatibility for configs written before command/tool confirmation
+    # were split. New settings take precedence when present.
+    legacy_confirmation = merged_config.pop("require_confirmation", None)
+    if legacy_confirmation is not None:
+        merged_config["command_confirmation"] = legacy_confirmation
+        merged_config["tool_confirmation"] = legacy_confirmation
 
     # Apply function parameters (highest priority)
     if debug:
@@ -254,13 +272,9 @@ def load_configuration(
     try:
         config = HashConfig(**merged_config)
     except Exception as e:
-        # If configuration is invalid, create default config and show warning
-        config = HashConfig()
-        if debug:
-            print(f"Warning: Invalid configuration, using defaults. Error: {e}")
-
-        # Save the default/fallback configuration
-        save_config(config, primary_config_path)
+        message = f"Invalid configuration: {e}"
+        print(f"Warning: {message}", file=sys.stderr)
+        raise ConfigurationError(message) from e
 
     # After creating config, apply standard API key env overrides.
     def get_nonempty_env_value(env_var: str) -> Optional[str]:
@@ -284,10 +298,6 @@ def load_configuration(
         google_key = get_nonempty_env_value("GEMINI_API_KEY") or get_nonempty_env_value("GOOGLE_API_KEY")
         if google_key:
             config.google_api_key = google_key
-
-    # If no config file was loaded, save the default one
-    if not config_loaded_from_file:
-        save_config(config, primary_config_path)
 
     return config
 
@@ -351,16 +361,9 @@ def update_config_values(updates: Dict[str, Any], config_path: Optional[Path] = 
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
-        normalized_updates = {
-            key: _normalize_toml_value(value)
-            for key, value in updates.items()
-            if value is not None
-        }
+        normalized_updates = {key: _normalize_toml_value(value) for key, value in updates.items() if value is not None}
 
-        serialized_assignments = {
-            key: tomli_w.dumps({key: value}).strip()
-            for key, value in normalized_updates.items()
-        }
+        serialized_assignments = {key: tomli_w.dumps({key: value}).strip() for key, value in normalized_updates.items()}
 
         if not config_path.exists():
             content = "\n".join(serialized_assignments[key] for key in normalized_updates)
@@ -404,11 +407,110 @@ def update_config_values(updates: Dict[str, Any], config_path: Optional[Path] = 
         return False
 
 
-# Configuration validation and helper functions
-class ConfigurationError(Exception):
-    """Configuration-related errors."""
+def remove_config_keys(keys: List[str], config_path: Optional[Path] = None) -> bool:
+    """Remove top-level keys from a TOML config file, preserving comments and unrelated settings."""
+    if config_path is None:
+        config_path = Path.home() / ".hashcli" / "config.toml"
 
-    pass
+    try:
+        if not config_path.exists():
+            return True
+
+        key_set = set(keys)
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+        kept_lines = []
+        for line in lines:
+            stripped = line.lstrip()
+            remove_line = False
+            if stripped and not stripped.startswith("#"):
+                for key in key_set:
+                    if re.match(rf"^\s*{re.escape(key)}\s*=", line):
+                        remove_line = True
+                        break
+            if not remove_line:
+                kept_lines.append(line)
+
+        final_text = "\n".join(kept_lines)
+        if kept_lines:
+            final_text += "\n"
+        config_path.write_text(final_text, encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def _unwrap_optional_type(annotation: Any) -> Any:
+    origin = get_origin(annotation)
+    if origin is Union:
+        args = [arg for arg in get_args(annotation) if arg is not type(None)]
+        if len(args) == 1:
+            return args[0]
+    return annotation
+
+
+def parse_config_value(key: str, raw_value: str) -> Any:
+    """Parse a CLI config value according to the HashConfig field type."""
+    if key not in HashConfig.model_fields:
+        valid = ", ".join(sorted(HashConfig.model_fields))
+        raise ConfigurationError(f"Unknown config key: {key}. Valid keys: {valid}")
+
+    field = HashConfig.model_fields[key]
+    annotation = _unwrap_optional_type(field.annotation)
+    value = raw_value.strip()
+
+    if annotation is bool:
+        normalized = value.lower()
+        if normalized in ("true", "1", "yes", "on"):
+            return True
+        if normalized in ("false", "0", "no", "off"):
+            return False
+        raise ConfigurationError(f"{key} must be a boolean value.")
+
+    if annotation is int:
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise ConfigurationError(f"{key} must be an integer value.") from exc
+
+    origin = get_origin(annotation)
+    if origin is list or annotation is list:
+        try:
+            return tomllib.loads(f"value = {value}")["value"]
+        except Exception as exc:
+            raise ConfigurationError(f'{key} must be a TOML list literal, for example ["foo", "bar"].') from exc
+
+    if annotation is Path:
+        return value
+
+    if isinstance(annotation, type) and issubclass(annotation, Enum):
+        parsed = _parse_string_value(value)
+        try:
+            return annotation(parsed).value
+        except ValueError as exc:
+            valid = ", ".join(item.value for item in annotation)
+            raise ConfigurationError(f"{key} must be one of: {valid}.") from exc
+
+    if annotation is str:
+        return _parse_string_value(value)
+
+    return _parse_toml_scalar_or_string(value)
+
+
+def _parse_string_value(value: str) -> str:
+    if len(value) >= 2 and value[0] in ("'", '"') and value[-1] == value[0]:
+        try:
+            parsed = tomllib.loads(f"value = {value}")["value"]
+        except Exception as exc:
+            raise ConfigurationError(f"Invalid quoted string: {value}") from exc
+        return str(parsed)
+    return value
+
+
+def _parse_toml_scalar_or_string(value: str) -> Any:
+    try:
+        return tomllib.loads(f"value = {value}")["value"]
+    except Exception:
+        return _parse_string_value(value)
 
 
 def validate_api_setup(config: HashConfig) -> None:
@@ -417,7 +519,8 @@ def validate_api_setup(config: HashConfig) -> None:
         provider = config.llm_provider.value
         env_var = f"{provider.upper()}_API_KEY"
         raise ConfigurationError(
-            f"No API key configured for {provider}. Set {env_var} environment variable or add to config file."
+            f"No API key configured for {provider}. Set {env_var} environment variable or add to config file. "
+            'Run "hi --config" to set this up interactively.'
         )
 
 
@@ -440,9 +543,9 @@ def get_model_options(provider: LLMProvider) -> List[str]:
         return [
             "gemini-3-pro-preview",
             "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite-preview",
             "gemini-2.5-pro",
             "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
         ]
     else:
         return []
@@ -451,5 +554,5 @@ def get_model_options(provider: LLMProvider) -> List[str]:
 default_model = {
     LLMProvider.OPENAI: "gpt-5-nano",
     LLMProvider.ANTHROPIC: "claude-haiku-4-5-20251001",
-    LLMProvider.GOOGLE: "gemini-3.1-flash-lite-preview"
+    LLMProvider.GOOGLE: "gemini-3.1-flash-lite-preview",
 }

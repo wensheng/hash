@@ -25,11 +25,21 @@ _hash_completion() {
     fi
 }
 
+_hash_completion_commands() {
+    local commands
+    commands="$(hashcli --completion-commands 2>/dev/null | awk -F '\t' '{print $1}')"
+    if [[ -z "$commands" ]]; then
+        commands="help history config"
+    fi
+    printf '%s\n' "$commands"
+}
+
 # Command proxy mode completions
 _hash_command_proxy_mode() {
     local proxy_content="$1"
     local cur="${COMP_WORDS[COMP_CWORD]}"
-    local slash_commands="help history"
+    local slash_commands
+    slash_commands="$(_hash_completion_commands)"
 
     # Extract the command name (after /)
     local proxy_cmd
@@ -44,8 +54,12 @@ _hash_command_proxy_mode() {
             ;;
         history)
             # History options
-            local history_options="list show clear"
+            local history_options="list show search clear"
             COMPREPLY=( $(compgen -W "$history_options" -- "$cur") )
+            ;;
+        config)
+            local config_options="get set unset"
+            COMPREPLY=( $(compgen -W "$config_options" -- "$cur") )
             ;;
         "")
             # List available slash commands

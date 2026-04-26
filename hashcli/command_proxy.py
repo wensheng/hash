@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, List, Optional, Type
 
-from .config import HashConfig
+from .config import HashConfig, ConfigurationError, parse_config_value, remove_config_keys, update_config_values
 from .ui import console
 
 
@@ -169,6 +169,7 @@ class CommandProxy:
 
         commands["help"] = HelpCommand()
         commands["history"] = HistoryCommand()
+        commands["config"] = ConfigCommand()
 
         # Register installed plugins from ~/.hashcli/plugins
         plugin_dir = get_user_plugin_directory()
@@ -236,11 +237,7 @@ class HistoryCommand(Command):
                 matches = history.find_session_ids(requested_session_id)
                 if len(matches) > 1:
                     match_list = "\n".join(f"  {match}" for match in matches[:10])
-                    return (
-                        f"Ambiguous session ID prefix {requested_session_id!r}. "
-                        "Matches:\n"
-                        f"{match_list}"
-                    )
+                    return f"Ambiguous session ID prefix {requested_session_id!r}. " "Matches:\n" f"{match_list}"
                 return f"No messages found for session {requested_session_id}"
 
             messages = history.get_session_messages(session_id)
@@ -261,6 +258,26 @@ class HistoryCommand(Command):
             else:
                 return "Failed to clear history."
 
+        elif args[0] == "search" and len(args) > 1:
+            query = " ".join(args[1:]).strip()
+            if not query:
+                return "Search query is required.\n\n" + self.get_help()
+
+            results = history.search_messages(query)
+            if not results:
+                return f"No history matches found for {query!r}."
+
+            output = f"History matches for {query!r}:\n"
+            for result in results[:20]:
+                session_prefix = result["session_id"][:12]
+                role = result["role"].upper()
+                timestamp = result["timestamp"]
+                snippet = " ".join(result["content"].split())
+                if len(snippet) > 120:
+                    snippet = snippet[:117] + "..."
+                output += f"  {session_prefix}  {role:<9} {timestamp}  {snippet}\n"
+            return output.strip()
+
         else:
             return self.get_help()
 
@@ -268,4 +285,50 @@ class HistoryCommand(Command):
         return """Manage conversation history:
   /history list        - List recent conversations
   /history show <id>   - Show specific conversation by full ID or unique prefix
+  /history search <q>  - Search messages across history
   /history clear       - Clear all history"""
+
+
+class ConfigCommand(Command):
+    """Command to inspect and update configuration values."""
+
+    def execute(self, args: List[str], config: HashConfig) -> str:
+        if not args:
+            return self.get_help()
+
+        action = args[0]
+        if action == "get" and len(args) == 2:
+            key = args[1]
+            if key not in HashConfig.model_fields:
+                return f"Unknown config key: {key}"
+            value = getattr(config, key)
+            if hasattr(value, "value"):
+                value = value.value
+            return f"{key} = {value}"
+
+        if action == "set" and len(args) >= 3:
+            key = args[1]
+            raw_value = " ".join(args[2:])
+            try:
+                parsed_value = parse_config_value(key, raw_value)
+            except ConfigurationError as exc:
+                return str(exc)
+            if not update_config_values({key: parsed_value}):
+                return f"Failed to update config key: {key}"
+            return f"Set {key}."
+
+        if action == "unset" and len(args) == 2:
+            key = args[1]
+            if key not in HashConfig.model_fields:
+                return f"Unknown config key: {key}"
+            if not remove_config_keys([key]):
+                return f"Failed to unset config key: {key}"
+            return f"Unset {key}."
+
+        return self.get_help()
+
+    def get_help(self) -> str:
+        return """Manage configuration:
+  /config get <key>          - Show an effective config value
+  /config set <key> <value>  - Persist a config value
+  /config unset <key>        - Remove a persisted config key"""

@@ -19,20 +19,16 @@ autoload -Uz bashcompinit && bashcompinit
 
 # Hashcmd zsh integration
 hash-magic-execute() {
-    if [[ "$BUFFER" == *"##"* ]]; then
-        # Ignore everything after ## so comments never trigger hcli
-        local command_before_comment="${BUFFER%%##*}"
-        if [[ -z "${command_before_comment//[[:space:]]/}" ]]; then
-            BUFFER=""
-            zle reset-prompt
-        else
-            BUFFER="$command_before_comment"
-            zle .accept-line
-        fi
-    elif [[ "$BUFFER" == *"#"* ]]; then
+    local trimmed_buffer="${BUFFER#"${BUFFER%%[![:space:]]*}"}"
+
+    if [[ "$trimmed_buffer" == "##"* ]]; then
+        # Keep ## as a plain shell comment escape.
+        BUFFER=""
+        zle reset-prompt
+    elif [[ "$trimmed_buffer" == "#"* ]]; then
         # Execute hashcli with the full command line
         zle -I
-        hcli "$BUFFER" < /dev/tty
+        hashcli "$BUFFER" < /dev/tty
         # Clear buffer
         BUFFER=""
         # Redraw prompt
@@ -59,12 +55,13 @@ cat > ~/.config/fish/config.fish << 'EOF'
 # Hashcmd fish integration
 function hashcli_intercept --on-event fish_preexec
     set -l cmd (commandline)
-    if string match -q '*##*' $cmd
-        # Let shell handle comments normally
+    set -l trimmed_cmd (string trim --left -- "$cmd")
+    if string match -q '##*' "$trimmed_cmd"
+        # Keep ## as a plain shell comment escape.
         return 0
-    else if string match -q '*#*' $cmd
+    else if string match -q '#*' "$trimmed_cmd"
         # Execute hashcli with the full command line
-        hcli "$cmd" < /dev/tty
+        hashcli "$cmd" < /dev/tty
         # Clear commandline
         commandline -r ""
         # Cancel execution of the original command
@@ -74,7 +71,7 @@ function hashcli_intercept --on-event fish_preexec
 end
 
 # Fish completion for hashcli (basic)
-complete -c hcli -f -a "(__fish_complete_subcommand)"
+complete -c hashcli -f -a "(__fish_complete_subcommand)"
 EOF
 
 echo "Shell integrations setup complete!"
