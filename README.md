@@ -7,7 +7,7 @@
 Talk to your terminal in plain English. Get instant help with commands, examples, and safe execution suggestions without leaving your shell.  You never have to context-switch to a browser again.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
 [![PyPI version](https://badge.fury.io/py/hashcli.svg)](https://badge.fury.io/py/hashcli)
 
 [Quick Start](#quick-start) • [Why](#why-hash-cli) • [Features](#features) • [Examples](#real-world-examples) • [Docs](#configuration)
@@ -45,7 +45,7 @@ Choose [y] execute, [n] cancel, [x] explain, [e] edit [y/n/x/e] (n): y
 
 ### Installation
 
-Install Hash CLI with `uv` (recommended) or pip/pipx:
+Hash CLI is a single native binary. Install it with `uv` (recommended) or pip/pipx, which download a prebuilt wheel containing the `hashcli` and `hi` executables:
 
     uv tool install hashcli
 
@@ -53,6 +53,12 @@ Install Hash CLI with `uv` (recommended) or pip/pipx:
 pipx install hashcli
 #or
 pip install hashcli
+```
+
+Or build from source with Rust (1.88+):
+
+```bash
+cargo install --path .   # run inside this directory
 ```
 
 ### Setup
@@ -181,20 +187,20 @@ Create custom slash commands for your specific workflow:
 
 ```bash
 # Install a plugin
-hi --add-cmd plugins/model.py
+hi --add-cmd plugins/hello.py
 
 # Non-interactive install
-hi --add-cmd plugins/model.py --yes
+hi --add-cmd plugins/hello.py --yes
 
 # See installed plugins
 hi --list-plugins
 
 # Use it
-hi /model
-hi /model list
+hi /hello
+hi /hello world
 ```
 
-Install previews show the command name, class name, destination path, and first help line before copying. Plugins are validated in a subprocess before installation. Build plugins in minutes; check `plugins/` for examples.
+Install previews show the command name, destination path, and first help line before copying. Plugins are validated by running them with `--hashcli-help` before installation. Build plugins in minutes in any language; check `plugins/` for an example.
 
 ### Smart Configuration
 
@@ -247,7 +253,7 @@ Hash CLI is designed with security as a first-class feature:
 - Tool calls and command execution are shown before they run when confirmation is required
 
 **Command Filtering**
-- Blocked commands list prevents dangerous operations
+- Blocked commands list prevents dangerous operations (entries match whole words, so `su` blocks `su -` but not `cat results.txt`)
 - Optional allowed commands whitelist for strict environments
 - Shell operators can be restricted via config
 
@@ -334,42 +340,43 @@ allowed_commands = []  # empty = allow all (except blocked)
 
 ### Create Your Own Plugin
 
-```python
-# my_plugin.py
-from typing import List
-from hashcli.command_proxy import Command
-from hashcli.config import HashConfig
+A plugin is any executable file: a shell script, a Python script, a compiled binary, and so on. The command name is the lowercase file name without its extension (`deploy.sh` becomes `/deploy`).
 
-class MyPluginCommand(Command):
-    """Custom functionality for my workflow"""
+The protocol:
 
-    def execute(self, args: List[str], config: HashConfig) -> str:
-        # Your plugin logic here
-        return f"Plugin executed with args: {args}"
+- `<plugin> --hashcli-help` prints help text and exits 0. The first line is the summary shown in `/help`, `--list-plugins`, and shell completions.
+- `<plugin> <args...>` runs the command. Whatever it prints to stdout is the result. stdin and stderr stay attached to your terminal, and a non-zero exit code is reported as an error.
+- `HASHCLI_PLUGIN_NAME` is set to the command name, and `HASHCLI_PLUGIN_CONFIG` holds the effective configuration as JSON, with API keys removed.
 
-    def get_help(self) -> str:
-        return "Usage: /my-plugin [args]\nDoes something useful."
-
-    def validate_args(self, args: List[str]) -> bool:
-        return True
+```sh
+#!/bin/sh
+# deploy.sh
+if [ "$1" = "--hashcli-help" ]; then
+  echo "Deploy the current project"
+  echo "  /deploy <env>   - Deploy to the given environment"
+  exit 0
+fi
+echo "Deploying to ${1:-staging}..."
 ```
 
 ### Install & Use
 
 ```bash
-# Install your plugin
-hi --add-cmd my_plugin.py
+# Install your plugin (copied to ~/.hashcli/plugins/ and made executable)
+hi --add-cmd deploy.sh
 
 # Use it immediately
-hi /my-plugin arg1 arg2
+hi /deploy production
 
 # List or remove installed plugins
 hi --list-plugins
-hi --remove-cmd my_plugin
+hi --remove-cmd deploy
 ```
 
-Plugins are stored in `~/.hashcli/plugins/` and loaded automatically on startup.
+Plugins are stored in `~/.hashcli/plugins/` and discovered automatically. Built-in command names (`help`, `history`, `config`, `tldr`) are reserved.
 Use `--yes` with `--add-cmd` or `--remove-cmd` for non-interactive scripts.
+
+> Upgrading from the Python version: plugins that subclassed `hashcli.command_proxy.Command` no longer load. Rewrite them as standalone scripts using the protocol above (see `plugins/hello.py`).
 
 ---
 
@@ -397,6 +404,7 @@ hi --remove-cmd NAME
 hi /help             # Show available commands
 hi /history          # Manage conversation history
 hi /history search QUERY
+hi /tldr tar         # Quick examples for a command (tldr pages)
 
 # Flags
 --model MODEL             # Override model

@@ -1,24 +1,37 @@
-"""Example third-party slash-command plugin for Hash CLI."""
+#!/usr/bin/env python3
+"""Example Hash CLI plugin.
 
-from typing import List
+Plugins are standalone executables in any language. Install with:
 
-from hashcli.command_proxy import Command
+    hashcli --add-cmd plugins/hello.py
 
+Protocol:
+  * `hello.py --hashcli-help` prints help text (the first line is the summary).
+  * `hello.py <args...>` prints the command result to stdout.
+  * HASHCLI_PLUGIN_CONFIG holds the effective configuration as JSON (API keys removed).
+"""
 
-class HelloCommand(Command):
-    """Simple greeting command installed via --add-cmd."""
+import sys
 
-    def execute(self, args: List[str]) -> str:
-        if args:
-            target = " ".join(args).strip()
-            return f"Hello, {target}!"
-        return "Hello from Hash CLI plugin!"
-
-    def get_help(self) -> str:
-        return """Say hello:
+HELP = """Say hello:
   /hello                  - Print a default greeting
   /hello <name>           - Greet a specific name
 
 Examples:
   /hello
   /hello world"""
+
+
+def main(argv):
+    if argv[:1] == ["--hashcli-help"]:
+        print(HELP)
+        return 0
+    if argv:
+        print(f"Hello, {' '.join(argv).strip()}!")
+    else:
+        print("Hello from Hash CLI plugin!")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

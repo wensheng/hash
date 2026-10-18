@@ -1,0 +1,150 @@
+#compdef hash
+#autoload
+
+# Hash CLI completion system for zsh
+# Provides intelligent completions for both LLM and command proxy modes
+
+_hash() {
+    local context state line ret=1
+    local -a arguments
+    
+    # Get the current buffer content after #
+    local buffer_content="$BUFFER"
+    
+    # Check if we're completing a hash command (starts with #)
+    if [[ "$buffer_content" =~ ^[[:space:]]*#[[:space:]]* ]]; then
+        # Extract content after # and whitespace
+        local hash_content
+        hash_content="${buffer_content#*#}"
+        hash_content="${hash_content#"${hash_content%%[![:space:]]*}"}"
+        
+        # Mode detection: check if starts with /
+        if [[ "$hash_content" =~ ^[[:space:]]*/ ]]; then
+            _hash_command_proxy_mode "$hash_content"
+        else
+            _hash_llm_mode "$hash_content"
+        fi
+    else
+        # Not a hash command, provide general completions
+        _alternative \
+            'commands:available commands:(hashcli)' \
+            'files:files:_files'
+    fi
+}
+
+# Command proxy mode completions
+_hash_get_commands() {
+    local -a commands
+    commands=("${(@f)$({ hashcli --completion-commands } 2>/dev/null)}")
+    if (( ${#commands[@]} == 0 )); then
+        commands=('help:Show available commands' 'history:Manage conversation history' 'config:Manage configuration' 'tldr:Show quick examples for a command')
+    else
+        local -a formatted
+        local entry name desc
+        for entry in "${commands[@]}"; do
+            name="${entry%%	*}"
+            desc="${entry#*	}"
+            formatted+=("${name}:${desc}")
+        done
+        commands=("${formatted[@]}")
+    fi
+    print -l "${commands[@]}"
+}
+
+_hash_command_proxy_mode() {
+    local proxy_content="$1"
+    local proxy_cmd proxy_args
+    
+    # Extract the command name (after /)
+    proxy_cmd="${proxy_content#*/}"
+    proxy_cmd="${proxy_cmd%% *}"
+    
+    # Extract arguments if any
+    if [[ "$proxy_content" == *" "* ]]; then
+        proxy_args="${proxy_content#*/ *}"
+    fi
+    
+    case "$proxy_cmd" in
+        help)
+            # Help topics
+            local -a help_topics
+            help_topics=("${(@f)$(_hash_get_commands)}" 'commands:Available commands')
+            _describe 'help topics' help_topics
+            ;;
+        history)
+            local -a history_options
+            history_options=(
+                'list:List recent conversations'
+                'show:Show a conversation by ID'
+                'search:Search conversation history'
+                'clear:Clear all history'
+            )
+            _describe 'history options' history_options
+            ;;
+        config)
+            local -a config_options
+            config_options=(
+                'get:Show a config value'
+                'set:Set a config value'
+                'unset:Remove a config value'
+            )
+            _describe 'config options' config_options
+            ;;
+        *)
+            # Unknown slash command: suggest built-in slash commands
+            local -a slash_commands
+            slash_commands=("${(@f)$(_hash_get_commands)}")
+            if [[ -z "$proxy_cmd" ]]; then
+                # List available slash commands
+                _describe 'available commands' slash_commands -p '/'
+            else
+                _describe 'available commands' slash_commands -p '/'
+            fi
+            ;;
+    esac
+}
+
+# LLM mode completions
+_hash_llm_mode() {
+    local llm_content="$1"
+    local -a llm_suggestions
+    
+    # Provide contextual suggestions based on partial input
+    llm_suggestions=(
+        'how do I...:General how-to questions'
+        'what command...:Command discovery'
+        'explain...:Command explanation'
+        'show me examples for...:Command examples'
+        'find files...:File search and location help'
+        'fix permission issues:Resolve file or directory permission problems'
+        'convert this...:Data or code conversion help'
+        'backup my data::Data backup and recovery strategies'
+        'configure...:Configuration and setup guidance'
+        'install...:Software installation help'
+        'update...:Software update procedures'
+        'git commands help:Git version control assistance'
+        'docker command...:Docker command help'
+    )
+    
+    # Filter suggestions based on partial input
+    if [[ -n "$llm_content" ]]; then
+        local -a filtered_suggestions
+        local suggestion
+        for suggestion in "${llm_suggestions[@]}"; do
+            local key="${suggestion%%:*}"
+            if [[ "$key" == *"$llm_content"* ]] || [[ "$llm_content" == *"${key%% *}"* ]]; then
+                filtered_suggestions+=("$suggestion")
+            fi
+        done
+        if (( ${#filtered_suggestions[@]} > 0 )); then
+            _describe 'common queries' filtered_suggestions
+        else
+            _describe 'common queries' llm_suggestions
+        fi
+    else
+        _describe 'common queries' llm_suggestions
+    fi
+}
+
+# Register the completion function
+_hash "$@"
