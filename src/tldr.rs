@@ -697,7 +697,7 @@ impl Tldr {
                 let mut cached = 0;
                 for i in 0..archive.len() {
                     let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
-                    let name = entry.name().to_string();
+                    let name = entry.name().map_err(|e| e.to_string())?.into_owned();
                     let Some(caps) = ZIP_ENTRY.captures(&name) else {
                         continue;
                     };
